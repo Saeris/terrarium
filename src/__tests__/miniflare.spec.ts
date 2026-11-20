@@ -1,4 +1,4 @@
-import { Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import { mount, outbound } from "../miniflare";
 import { createTerrarium, type Account, type Terrarium } from "../terrarium";
@@ -44,12 +44,14 @@ describe("terrarium as a Worker's network", () => {
     await terrarium.seed("alice", [
       { collection: NOTE, rkey: "hello", record: { text: "hello, worker" } }
     ]);
-    app = new Miniflare({
-      modules: true,
-      script: APP,
-      compatibilityDate: "2025-12-02",
-      outboundService: outbound(terrarium, { unowned: "refuse" })
-    });
+    app = new Miniflare(
+      convertV4MiniflareOptions({
+        modules: true,
+        script: APP,
+        compatibilityDate: "2025-12-02",
+        outboundService: outbound(terrarium, { unowned: "refuse" })
+      })
+    );
     await app.ready;
   }, 60_000);
 

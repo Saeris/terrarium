@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { hash } from "bcryptjs";
 import {
+  convertV4MiniflareOptions,
   Miniflare,
   type Response as WorkerResponse,
   type WebSocket as WorkerWebSocket
@@ -79,36 +80,39 @@ export const startCirrus = async ({
 
   const signingKey = await keyFrom(account.signingKey);
   const authToken = secret();
-  const miniflare = new Miniflare({
-    modules: true,
-    scriptPath: BUNDLE,
-    // Module names are relative to this; left to the default (the working directory), a bundle outside it gets a `../` name that workerd refuses.
-    modulesRoot: dirname(BUNDLE),
-    compatibilityDate: "2025-12-02",
-    compatibilityFlags: ["nodejs_compat"],
-    durableObjects: {
-      ACCOUNT: { className: "AccountDurableObject", useSQLite: true },
-      SPACES: { className: "SpaceDurableObject", useSQLite: true },
-      SPACES_INDEX: { className: "SpaceIndexDurableObject", useSQLite: true }
-    },
-    r2Buckets: ["BLOBS"],
-    bindings: {
-      DID: account.did,
-      HANDLE: account.handle,
-      PDS_HOSTNAME: account.hostname,
-      AUTH_TOKEN: authToken,
-      SIGNING_KEY: account.signingKey,
-      SIGNING_KEY_PUBLIC: (await signingKey.exportPublicKey("did")).slice(
-        "did:key:".length
-      ),
-      JWT_SECRET: jwtSecret(account.signingKey),
-      PASSWORD_HASH: await hash(account.password, 10)
-    },
-    ...(persist !== undefined && { defaultPersistRoot: persist }),
-    ...(listen && { host: listen.host, port: listen.port }),
-    outboundService: async (request): Promise<WorkerResponse> =>
-      responseToWorker(await outbound(await fromWorker(request)))
-  });
+  // Written in Miniflare 4’s shape, which Miniflare 5 still converts: the shape Wrangler’s own options come in.
+  const miniflare = new Miniflare(
+    convertV4MiniflareOptions({
+      modules: true,
+      scriptPath: BUNDLE,
+      // Module names are relative to this; left to the default (the working directory), a bundle outside it gets a `../` name that workerd refuses.
+      modulesRoot: dirname(BUNDLE),
+      compatibilityDate: "2025-12-02",
+      compatibilityFlags: ["nodejs_compat"],
+      durableObjects: {
+        ACCOUNT: { className: "AccountDurableObject", useSQLite: true },
+        SPACES: { className: "SpaceDurableObject", useSQLite: true },
+        SPACES_INDEX: { className: "SpaceIndexDurableObject", useSQLite: true }
+      },
+      r2Buckets: ["BLOBS"],
+      bindings: {
+        DID: account.did,
+        HANDLE: account.handle,
+        PDS_HOSTNAME: account.hostname,
+        AUTH_TOKEN: authToken,
+        SIGNING_KEY: account.signingKey,
+        SIGNING_KEY_PUBLIC: (await signingKey.exportPublicKey("did")).slice(
+          "did:key:".length
+        ),
+        JWT_SECRET: jwtSecret(account.signingKey),
+        PASSWORD_HASH: await hash(account.password, 10)
+      },
+      ...(persist !== undefined && { resourcePersistencePath: persist }),
+      ...(listen && { host: listen.host, port: listen.port }),
+      outboundService: async (request): Promise<WorkerResponse> =>
+        responseToWorker(await outbound(await fromWorker(request)))
+    })
+  );
 
   const { origin: runtime } = await miniflare.ready;
 

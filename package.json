@@ -100,7 +100,7 @@
     "@bomb.sh/router": "0.8.0",
     "@clack/prompts": "1.9.0",
     "bcryptjs": "^3.0.3",
-    "miniflare": "4.20260730.0",
+    "miniflare": "5.20261104.0-beta",
     "valibot": "^1.5.0",
     "ws": "^8.23.0"
   },
