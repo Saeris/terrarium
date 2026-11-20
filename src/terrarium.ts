@@ -133,6 +133,52 @@ const appliedSchema = v.object({
   results: v.array(v.object({ uri: v.string(), cid: v.string() }))
 });
 
+const listedSchema = v.object({
+  cursor: v.optional(v.string()),
+  records: v.array(v.object({ uri: v.string() }))
+});
+
+/** Which of these collections' records the account already has, as `collection/rkey`, so a seed knows what it replaces. */
+const existingKeys = async (
+  engine: CirrusEngine,
+  account: StoredAccount,
+  collections: ReadonlySet<string>
+): Promise<Set<string>> => {
+  const keys = new Set<string>();
+
+  for (const collection of collections) {
+    let cursor: string | undefined;
+
+    do {
+      const url = new URL(
+        `${account.endpoint}/xrpc/com.atproto.repo.listRecords`
+      );
+
+      url.searchParams.set("repo", account.did);
+      url.searchParams.set("collection", collection);
+      url.searchParams.set("limit", "100");
+
+      if (cursor !== undefined) {
+        url.searchParams.set("cursor", cursor);
+      }
+
+      // oxlint-disable-next-line eslint/no-await-in-loop -- each page's cursor comes from the page before it.
+      const page = v.parse(
+        listedSchema,
+        await (await engine.fetch(new Request(url))).json()
+      );
+
+      for (const { uri } of page.records) {
+        keys.add(`${collection}/${uri.split("/").at(-1) ?? ""}`);
+      }
+
+      cursor = page.records.length > 0 ? page.cursor : undefined;
+    } while (cursor !== undefined);
+  }
+
+  return keys;
+};
+
 export const createTerrarium = async ({
   dir,
   host = DEFAULT_HOST,
@@ -368,6 +414,15 @@ export const createTerrarium = async ({
       }
 
       const seeded: Seeded[] = [];
+      const existing = await existingKeys(
+        engine,
+        account,
+        new Set(
+          records
+            .filter(({ rkey }) => rkey !== undefined)
+            .map(({ collection }) => collection)
+        )
+      );
 
       for (let at = 0; at < records.length; at += BATCH) {
         const response = await engine.fetch(
@@ -382,7 +437,11 @@ export const createTerrarium = async ({
               writes: records
                 .slice(at, at + BATCH)
                 .map(({ collection, rkey, record }) => ({
-                  $type: "com.atproto.repo.applyWrites#create",
+                  // A record that's already there is replaced, so a fixture can be applied again, or changed and re-applied.
+                  $type:
+                    rkey !== undefined && existing.has(`${collection}/${rkey}`)
+                      ? "com.atproto.repo.applyWrites#update"
+                      : "com.atproto.repo.applyWrites#create",
                   collection,
                   ...(rkey !== undefined && { rkey }),
                   value: { $type: collection, ...record }

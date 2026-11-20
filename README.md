@@ -70,7 +70,7 @@ terrarium jetstream                   # what's switched on
 
 ### Seeding
 
-A seed file is a list of records, or an object with a `records` list. `$type` defaults to the collection, and a record without an `rkey` gets a TID.
+A seed file is a list of records, or an object with a `records` list. `$type` defaults to the collection, and a record without an `rkey` gets a TID. A record whose `rkey` is already in the repo is replaced, so a fixture can be changed and applied again.
 
 ```json
 {

@@ -78,6 +78,27 @@ describe("the sandbox", () => {
     });
   }, 60_000);
 
+  it("replaces records a seed names again, so a fixture can be changed and re-applied", async () => {
+    await terrarium.seed("alice", [
+      { collection: NOTE, rkey: "note-000", record: { text: "changed" } },
+      { collection: NOTE, rkey: "brand-new", record: { text: "added" } }
+    ]);
+
+    const read = async (rkey: string): Promise<unknown> =>
+      (
+        await get(
+          `${alice.endpoint}/xrpc/com.atproto.repo.getRecord?repo=${alice.did}&collection=${NOTE}&rkey=${rkey}`
+        )
+      ).json();
+
+    await expect(read("note-000")).resolves.toMatchObject({
+      value: { text: "changed" }
+    });
+    await expect(read("brand-new")).resolves.toMatchObject({
+      value: { text: "added" }
+    });
+  }, 60_000);
+
   it("refuses to reach anything outside it", async () => {
     expect((await get("https://bsky.social/xrpc/_health")).status).toBe(502);
   });
