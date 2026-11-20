@@ -95,6 +95,7 @@ export const control =
         return json({
           plc: terrarium.plcUrl,
           jetstream: terrarium.jetstreamUrl,
+          ...(terrarium.local && { local: terrarium.local }),
           accounts: terrarium.accounts().length
         });
       }

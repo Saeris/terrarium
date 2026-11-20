@@ -45,6 +45,8 @@ export interface CirrusEngine {
   upgrade(url: string): Promise<WorkerWebSocket>;
   /** The bearer token Cirrus accepts for writes outside OAuth, for seeding. */
   readonly authToken: string;
+  /** Where Miniflare reaches its `workerd` process: Terrarium's own traffic, which an interceptor must let through. */
+  readonly runtime: string;
   dispose(): Promise<void>;
 }
 
@@ -119,10 +121,11 @@ export const startCirrus = async ({
     }
   });
 
-  await miniflare.ready;
+  const { origin: runtime } = await miniflare.ready;
 
   return {
     authToken,
+    runtime,
     async fetch(request) {
       const response = await miniflare.dispatchFetch(
         new WorkerRequest(request.url, {

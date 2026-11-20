@@ -35,3 +35,10 @@ export {
   type Jetstream,
   type JetstreamEvent
 } from "./jetstream";
+export {
+  DOH_HOSTS,
+  JETSTREAM_HOSTS,
+  JETSTREAM_URL,
+  PDS_DOMAIN,
+  PLC_HOST
+} from "./hosts";

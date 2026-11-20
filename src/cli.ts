@@ -168,11 +168,13 @@ const start = async ({
   if (human) {
     progress?.stop(`Sandbox running, ${String(accounts.length)} accounts`);
     log.info(
-      `Control API  ${server.url}\nPLC          ${server.plcUrl}\nJetstream    ${server.jetstreamUrl}`
+      `Control API  ${server.url}\nPLC          ${server.terrarium.plcUrl}  (local: ${server.plcUrl})\nJetstream    ${server.terrarium.jetstreamUrl}  (local: ${server.jetstreamUrl})`
     );
 
     for (const account of accounts) {
-      log.step(`${account.handle}  ${account.endpoint}  ${account.did}`);
+      log.step(
+        `${account.handle}  ${account.endpoint}  (local: ${account.local ?? "none"})  ${account.did}`
+      );
     }
 
     outro("Ctrl+C to stop");
@@ -180,8 +182,9 @@ const start = async ({
     console.log(
       JSON.stringify({
         control: server.url,
-        plc: server.plcUrl,
-        jetstream: server.jetstreamUrl,
+        plc: server.terrarium.plcUrl,
+        jetstream: server.terrarium.jetstreamUrl,
+        local: { plc: server.plcUrl, jetstream: server.jetstreamUrl },
         dir,
         accounts
       })

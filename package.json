@@ -30,6 +30,14 @@
       "types": "./dist/index.d.mts",
       "default": "./dist/index.mjs"
     },
+    "./msw": {
+      "types": "./dist/msw.d.mts",
+      "default": "./dist/msw.mjs"
+    },
+    "./playwright": {
+      "types": "./dist/playwright.d.mts",
+      "default": "./dist/playwright.mjs"
+    },
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -43,12 +51,17 @@
     "publish": true
   },
   "devDependencies": {
+    "@atcute/client": "^5.1.2",
+    "@atcute/identity": "^2.0.2",
+    "@atcute/identity-resolver": "^2.0.3",
     "@getcirrus/pds": "0.19.0",
     "@saeris/configs": "^1.6.1",
     "@types/node": "^26.6.6",
     "@types/ws": "^8.18.2",
     "@varlock/bumpy": "^1.19.0",
     "@vitest/coverage-v8": "catalog:",
+    "msw": "3.0.5",
+    "playwright-core": "1.65.0",
     "typescript": "^6.0.3",
     "vite-plus": "catalog:",
     "vitest": "catalog:",
@@ -90,5 +103,17 @@
   "scripts": {
     "build:engines": "wrangler deploy --dry-run --config engines/cirrus/wrangler.jsonc --outdir dist"
   },
-  "bin": "./dist/cli.mjs"
+  "bin": "./dist/cli.mjs",
+  "peerDependencies": {
+    "msw": "^3.0.0",
+    "playwright-core": "^1.48.0"
+  },
+  "peerDependenciesMeta": {
+    "msw": {
+      "optional": true
+    },
+    "playwright-core": {
+      "optional": true
+    }
+  }
 }

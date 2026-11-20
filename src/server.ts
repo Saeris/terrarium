@@ -28,7 +28,9 @@ export interface ServerOptions {
 export interface Server {
   /** The control API. */
   readonly url: string;
+  /** The PLC directory on a local port, for clients nothing intercepts. Intercepted clients use `https://plc.directory`. */
   readonly plcUrl: string;
+  /** Jetstream on a local port, for clients nothing intercepts. Intercepted clients use Bluesky's own Jetstream addresses. */
   readonly jetstreamUrl: string;
   readonly terrarium: Terrarium;
   close(): Promise<void>;
@@ -78,8 +80,8 @@ export const startServer = async ({
 
   return {
     url: api.url,
-    plcUrl: terrarium.plcUrl,
-    jetstreamUrl: terrarium.jetstreamUrl,
+    plcUrl: plc.url,
+    jetstreamUrl: `${jetstream.url.replace(/^http/u, "ws")}/subscribe`,
     terrarium,
     async close() {
       await Promise.all([api.close(), plc.close(), jetstream.close()]);

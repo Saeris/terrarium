@@ -3,12 +3,21 @@ import { join, resolve } from "node:path";
 import { deriveDidFromGenesisOp, signOperation } from "@atcute/did-plc";
 import * as v from "valibot";
 import { startCirrus, type CirrusEngine } from "./engines/cirrus";
+import {
+  dohAnswer,
+  dohHandle,
+  isTestHost,
+  JETSTREAM_HOSTS,
+  JETSTREAM_URL,
+  PDS_DOMAIN,
+  PLC_HOST
+} from "./hosts";
 import { createJetstream, filterFrom, type Jetstream } from "./jetstream";
 import { keyFrom, newKey } from "./keys";
 import { createPlc } from "./plc";
 
 /**
- * The sandbox: a PLC directory, one Cirrus PDS per account, and a Jetstream fed by their firehoses, all routed by origin through one `fetch`, so nothing they do to each other leaves the process unless something is listening on a port.
+ * The sandbox: a PLC directory, one Cirrus PDS per account, and a Jetstream fed by their firehoses, answering at the addresses the network uses. `plc.directory` is its PLC directory, Bluesky's Jetstream hosts are its Jetstream, and each account's DID document names its PDS at `https://<name>.terrarium.test`. A client under test keeps its real configuration; an interceptor (`./msw`, `./playwright`, or Miniflare's outbound service) hands `fetch` whatever `owns` says is Terrarium's.
  *
  * Accounts are made on demand (`createAccount`), each a real did:plc on its own PDS, and seeded with records (`seed`). With a directory, all of it survives a restart: same DIDs, same keys, same records. Jetstream's history doesn't: it starts empty, as a real one would for a client that's been away longer than its retention.
  */
@@ -42,6 +51,8 @@ const storedAccountSchema = v.object({
   handle: v.string(),
   /** The PDS's origin, as the DID document names it. */
   endpoint: v.string(),
+  /** The port the PDS also answers on when the sandbox runs as a server. */
+  port: v.number(),
   password: v.string(),
   /** The repo's signing key, hex: Cirrus's `SIGNING_KEY`. */
   signingKey: v.string(),
@@ -49,8 +60,11 @@ const storedAccountSchema = v.object({
   rotationKey: v.string()
 });
 
+/** The state file's version: identities made by an earlier one name other addresses, so they're started afresh rather than migrated. */
+const VERSION = 2;
+
 const stateSchema = v.object({
-  version: v.literal(1),
+  version: v.literal(VERSION),
   accounts: v.array(storedAccountSchema)
 });
 
@@ -61,27 +75,29 @@ export interface Account {
   readonly name: string;
   readonly did: string;
   readonly handle: string;
-  /** The PDS's URL. */
+  /** The PDS's URL, as its DID document names it. */
   readonly endpoint: string;
+  /** The same PDS on a local port, when the sandbox runs as a server: for clients nothing intercepts, such as `curl`. */
+  readonly local?: string;
   readonly password: string;
 }
 
 export interface TerrariumOptions {
   /** Where to keep accounts, the PLC log and each PDS's data. In memory when left out. */
   readonly dir?: string;
-  /** The host every service is addressed by. */
+  /** The host the local ports are on, when listening. */
   readonly host?: string;
   readonly ports?: {
     readonly plc: number;
     readonly jetstream: number;
     readonly pds: number;
   };
-  /** Have each PDS answer on its own port, for clients outside this process. */
+  /** Have each PDS answer on its own port too, for clients outside this process that nothing intercepts. */
   readonly listen?: boolean;
 }
 
 export interface NewAccount {
-  /** Short name for the account: `alice` makes `alice.test`. */
+  /** Short name for the account: `alice` makes `alice.test`, on `https://alice.terrarium.test`. */
   readonly name: string;
   readonly handle?: string | undefined;
   readonly password?: string | undefined;
@@ -100,34 +116,32 @@ export interface Seeded {
 }
 
 export interface Terrarium {
-  /** The PLC directory's URL: give it to anything that resolves did:plc. */
+  /** The PLC directory: `https://plc.directory`, as clients already have it. */
   readonly plcUrl: string;
-  /** Jetstream's subscribe URL: give it to anything that follows changes. */
+  /** Where to subscribe to Jetstream: one of Bluesky's own addresses, as clients already have it. */
   readonly jetstreamUrl: string;
+  /** The local ports, when listening: for clients nothing intercepts. */
+  readonly local?: { readonly plc: string; readonly jetstream: string };
   /** Jetstream itself, for subscribing in-process and for switching its faults on and off. */
   readonly jetstream: Jetstream;
-  /** Any request to any service in the sandbox, routed by its origin. Anything else is refused, never sent to the network. */
+  /** Whether a request to this URL is Terrarium's to answer. What an interceptor asks before handing a request over. */
+  owns(url: string | URL): boolean;
+  /** Whether a request is Terrarium's own traffic, to the `workerd` processes behind its PDSes, which an interceptor in the same process must let through untouched. */
+  internal(url: string | URL): boolean;
+  /** Any request to any service in the sandbox, routed by its host. Anything else is refused, never sent to the network. */
   fetch(request: Request): Promise<Response>;
   /** A WebSocket to Jetstream without a socket, for clients that take a `connect` function. */
   connect(url: string): SocketLike;
   accounts(): readonly Account[];
   account(name: string): Account | undefined;
   createAccount(account: NewAccount): Promise<Account>;
-  /** Write records to an account's repo, as the account. */
+  /** Write records to an account's repo, as the account. A record whose `rkey` is already there is replaced. */
   seed(name: string, records: readonly SeedRecord[]): Promise<Seeded[]>;
   dispose(): Promise<void>;
 }
 
 /** The most writes one `applyWrites` takes. */
 const BATCH = 200;
-
-const publicView = ({
-  name,
-  did,
-  handle,
-  endpoint,
-  password
-}: StoredAccount): Account => ({ name, did, handle, endpoint, password });
 
 const appliedSchema = v.object({
   results: v.array(v.object({ uri: v.string(), cid: v.string() }))
@@ -179,6 +193,25 @@ const existingKeys = async (
   return keys;
 };
 
+const readState = async (file: string): Promise<StoredAccount[]> => {
+  const text = await readFile(file, "utf8").catch(() => undefined);
+
+  if (text === undefined) {
+    return [];
+  }
+
+  const state: unknown = JSON.parse(text);
+  const parsed = v.safeParse(stateSchema, state);
+
+  if (!parsed.success) {
+    throw new Error(
+      `${file} was made by an older Terrarium, whose accounts name other addresses. Delete its directory and start again.`
+    );
+  }
+
+  return parsed.output.accounts;
+};
+
 export const createTerrarium = async ({
   dir,
   host = DEFAULT_HOST,
@@ -191,23 +224,34 @@ export const createTerrarium = async ({
     await mkdir(dir, { recursive: true });
   }
 
-  const plcUrl = `http://${host}:${String(ports.plc)}`;
   const plc = await createPlc(dir ? { file: join(dir, "plc.json") } : {});
-  const stored: StoredAccount[] = stateFile
-    ? v.parse(
-        stateSchema,
-        JSON.parse(
-          await readFile(stateFile, "utf8").catch(
-            () => '{"version":1,"accounts":[]}'
-          )
-        )
-      ).accounts
-    : [];
+  const stored: StoredAccount[] = stateFile ? await readState(stateFile) : [];
+  /** Each account's PDS, by the host its DID document names. */
   const engines = new Map<string, CirrusEngine>();
   const jetstream = createJetstream();
-  const jetstreamOrigin = `http://${host}:${String(ports.jetstream)}`;
-  const jetstreamUrl = `ws://${host}:${String(ports.jetstream)}/subscribe`;
+  const local = listen
+    ? {
+        plc: `http://${host}:${String(ports.plc)}`,
+        jetstream: `ws://${host}:${String(ports.jetstream)}/subscribe`
+      }
+    : undefined;
   let disposed = false;
+
+  const localOf = (account: StoredAccount): string | undefined =>
+    listen ? `http://${host}:${String(account.port)}` : undefined;
+
+  const publicView = (account: StoredAccount): Account => {
+    const alias = localOf(account);
+
+    return {
+      name: account.name,
+      did: account.did,
+      handle: account.handle,
+      endpoint: account.endpoint,
+      ...(alias !== undefined && { local: alias }),
+      password: account.password
+    };
+  };
 
   /** Feed a PDS's firehose to Jetstream, and pick it up again if it drops, for as long as the sandbox runs. */
   const follow = async (
@@ -224,7 +268,7 @@ export const createTerrarium = async ({
       }
     });
     socket.addEventListener("close", () => {
-      if (!disposed && engines.get(new URL(endpoint).origin) === engine) {
+      if (!disposed && engines.get(new URL(endpoint).host) === engine) {
         void follow(engine, endpoint);
       }
     });
@@ -237,31 +281,67 @@ export const createTerrarium = async ({
 
     await writeFile(
       `${stateFile}.tmp`,
-      JSON.stringify({ version: 1, accounts: stored }, null, 2)
+      JSON.stringify({ version: VERSION, accounts: stored }, null, 2)
     );
     await rename(`${stateFile}.tmp`, stateFile);
   };
 
-  const route = async (request: Request): Promise<Response> => {
-    const { origin } = new URL(request.url);
+  const byHandle = (handle: string): StoredAccount | undefined =>
+    stored.find((account) => account.handle === handle);
 
-    if (origin === plcUrl) {
+  const isJetstream = (url: URL): boolean =>
+    JETSTREAM_HOSTS.has(url.hostname) ||
+    (local !== undefined && url.host === new URL(local.jetstream).host);
+
+  const owns = (target: string | URL): boolean => {
+    const url = new URL(target);
+    const doh = dohHandle(url);
+
+    return (
+      url.hostname === PLC_HOST ||
+      isJetstream(url) ||
+      isTestHost(url.hostname) ||
+      (doh !== undefined && byHandle(doh) !== undefined)
+    );
+  };
+
+  const route = async (request: Request): Promise<Response> => {
+    const url = new URL(request.url);
+
+    if (
+      url.hostname === PLC_HOST ||
+      (local !== undefined && url.origin === local.plc)
+    ) {
       return plc.fetch(request);
     }
 
-    if (origin === jetstreamOrigin) {
-      return new Response("Jetstream speaks WebSocket: use `connect`.", {
-        status: 426
+    if (isJetstream(url)) {
+      return new Response("Jetstream speaks WebSocket.", { status: 426 });
+    }
+
+    const engine = engines.get(url.host);
+
+    if (engine) {
+      return engine.fetch(request);
+    }
+
+    const handled = byHandle(url.hostname);
+
+    if (handled && url.pathname === "/.well-known/atproto-did") {
+      return new Response(handled.did, {
+        headers: { "content-type": "text/plain" }
       });
     }
 
-    const engine = engines.get(origin);
+    const doh = dohHandle(url);
 
-    return engine
-      ? engine.fetch(request)
-      : new Response(`Terrarium has no service at ${origin}.`, {
-          status: 502
-        });
+    if (doh !== undefined) {
+      return dohAnswer(doh, byHandle(doh)?.did);
+    }
+
+    return new Response(`Terrarium has no service at ${url.origin}.`, {
+      status: 502
+    });
   };
 
   const start = async (account: StoredAccount): Promise<void> => {
@@ -276,12 +356,10 @@ export const createTerrarium = async ({
       },
       ...(dir && { persist: resolve(dir, "pds", account.name) }),
       outbound: route,
-      ...(listen && {
-        listen: { host: endpoint.hostname, port: Number(endpoint.port) }
-      })
+      ...(listen && { listen: { host, port: account.port } })
     });
 
-    engines.set(endpoint.origin, engine);
+    engines.set(endpoint.host, engine);
     await follow(engine, endpoint.origin);
   };
 
@@ -302,10 +380,7 @@ export const createTerrarium = async ({
 
     // Opened on the next tick, as a real socket is, so a client can set its handlers first.
     queueMicrotask(() => {
-      if (
-        `http://${target.host}` !== jetstreamOrigin ||
-        target.pathname !== "/subscribe"
-      ) {
+      if (!isJetstream(target) || target.pathname !== "/subscribe") {
         socket.onerror?.();
         socket.onclose?.();
 
@@ -332,9 +407,15 @@ export const createTerrarium = async ({
   }
 
   return {
-    plcUrl,
-    jetstreamUrl,
+    plcUrl: `https://${PLC_HOST}`,
+    jetstreamUrl: JETSTREAM_URL,
+    ...(local && { local }),
     jetstream,
+    owns,
+    internal: (url) =>
+      [...engines.values()].some(
+        (engine) => new URL(url).origin === engine.runtime
+      ),
     fetch: route,
     connect,
     accounts: () => stored.map(publicView),
@@ -350,11 +431,9 @@ export const createTerrarium = async ({
         throw new Error(`There's already an account called ${name}.`);
       }
 
-      const port = Math.max(
-        ports.pds - 1,
-        ...stored.map((account) => Number(new URL(account.endpoint).port))
-      );
-      const endpoint = `http://${host}:${String(port + 1)}`;
+      const port =
+        Math.max(ports.pds - 1, ...stored.map((account) => account.port)) + 1;
+      const endpoint = `https://${name}.${PDS_DOMAIN}`;
       const signingKey = await newKey();
       const rotationKey = await newKey();
       const genesis = await signOperation(
@@ -376,7 +455,7 @@ export const createTerrarium = async ({
       );
       const did = await deriveDidFromGenesisOp(genesis);
       const registered = await plc.fetch(
-        new Request(`${plcUrl}/${did}`, {
+        new Request(`https://${PLC_HOST}/${did}`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(genesis)
@@ -394,6 +473,7 @@ export const createTerrarium = async ({
         did,
         handle: handle ?? `${name}.test`,
         endpoint,
+        port,
         password,
         signingKey,
         rotationKey
@@ -407,7 +487,7 @@ export const createTerrarium = async ({
     },
     async seed(name, records) {
       const account = stored.find((candidate) => candidate.name === name);
-      const engine = account && engines.get(new URL(account.endpoint).origin);
+      const engine = account && engines.get(new URL(account.endpoint).host);
 
       if (!account || !engine) {
         throw new Error(`There's no account called ${name}.`);
