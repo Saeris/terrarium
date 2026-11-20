@@ -3,11 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import {
-  newSigningKey,
   startCirrus,
   type CirrusAccount,
   type CirrusEngine
 } from "../engines/cirrus";
+import { newKey } from "../keys";
 
 /**
  * Cirrus is the PDS businesses run on in production, so Terrarium runs the same code rather than an imitation. These check the three things everything else builds on: it answers XRPC, it streams its firehose, and an account survives a restart with the same identity.
@@ -66,7 +66,7 @@ describe("cirrus inside Terrarium", () => {
       handle: "alice.test",
       hostname: "pds.alice.test",
       password: "correct horse battery staple",
-      signingKey: await newSigningKey()
+      signingKey: await newKey()
     };
     pds = await start();
   }, 60_000);

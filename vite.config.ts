@@ -14,7 +14,7 @@ export default defineConfig({
   },
   // ── Builds (tsdown) ─────────────────────────────────────────────────
   pack: {
-    entry: "src/index.ts",
+    entry: ["src/index.ts", "src/cli.ts"],
     clean: true,
     format: [`esm`],
     dts: true,

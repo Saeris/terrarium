@@ -1,7 +1,7 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
+import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Secp256k1Keypair } from "@atproto/crypto";
 import { hash } from "bcryptjs";
 import {
   Miniflare,
@@ -9,11 +9,13 @@ import {
   Response as WorkerResponse,
   type WebSocket as WorkerWebSocket
 } from "miniflare";
+import { keyFrom } from "../keys";
 
-/** Cirrus bundled into one module by `yarn build:engines`, with its Durable Objects. */
-const BUNDLE = fileURLToPath(
-  new URL("../../engines/cirrus/dist/entry.js", import.meta.url)
-);
+/** Cirrus bundled into one module by `yarn build:engines`, with its Durable Objects. Found from the source (`src/engines/`) and from the built package (`dist/`) alike. */
+const BUNDLE =
+  ["../../engines/cirrus/dist/entry.js", "../engines/cirrus/dist/entry.js"]
+    .map((path) => fileURLToPath(new URL(path, import.meta.url)))
+    .find((path) => existsSync(path)) ?? "engines/cirrus/dist/entry.js";
 
 /** One account on its own Cirrus, which is how Cirrus works: single-user, one deployment each. */
 export interface CirrusAccount {
@@ -32,6 +34,8 @@ export interface CirrusOptions {
   readonly persist?: string;
   /** Every request Cirrus makes to anywhere: resolving a DID, fetching an OAuth client's metadata, asking a relay to crawl. Nothing reaches the network unless this sends it there. */
   readonly outbound: (request: Request) => Promise<Response>;
+  /** Also answer on a socket, for clients outside this process. Left out, it's reachable only through `fetch`. */
+  readonly listen?: { readonly host: string; readonly port: number };
 }
 
 export interface CirrusEngine {
@@ -57,7 +61,8 @@ const jwtSecret = (signingKey: string): string =>
 export const startCirrus = async ({
   account,
   persist,
-  outbound
+  outbound,
+  listen
 }: CirrusOptions): Promise<CirrusEngine> => {
   if (!existsSync(BUNDLE)) {
     throw new Error(
@@ -65,11 +70,13 @@ export const startCirrus = async ({
     );
   }
 
-  const keypair = await Secp256k1Keypair.import(account.signingKey);
+  const signingKey = await keyFrom(account.signingKey);
   const authToken = secret();
   const miniflare = new Miniflare({
     modules: true,
     scriptPath: BUNDLE,
+    // Module names are relative to this; left to the default (the working directory), a bundle outside it gets a `../` name that workerd refuses.
+    modulesRoot: dirname(BUNDLE),
     compatibilityDate: "2025-12-02",
     compatibilityFlags: ["nodejs_compat"],
     durableObjects: {
@@ -84,11 +91,14 @@ export const startCirrus = async ({
       PDS_HOSTNAME: account.hostname,
       AUTH_TOKEN: authToken,
       SIGNING_KEY: account.signingKey,
-      SIGNING_KEY_PUBLIC: keypair.did().replace("did:key:", ""),
+      SIGNING_KEY_PUBLIC: (await signingKey.exportPublicKey("did")).slice(
+        "did:key:".length
+      ),
       JWT_SECRET: jwtSecret(account.signingKey),
       PASSWORD_HASH: await hash(account.password, 10)
     },
     ...(persist !== undefined && { defaultPersistRoot: persist }),
+    ...(listen && { host: listen.host, port: listen.port }),
     outboundService: async (request): Promise<WorkerResponse> => {
       const response = await outbound(
         new Request(request.url, {
@@ -147,11 +157,4 @@ export const startCirrus = async ({
       await miniflare.dispose();
     }
   };
-};
-
-/** A new identity for a Cirrus account: the signing key it keeps for life. */
-export const newSigningKey = async (): Promise<string> => {
-  const keypair = await Secp256k1Keypair.create({ exportable: true });
-
-  return Buffer.from(await keypair.export()).toString("hex");
 };

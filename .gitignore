@@ -33,3 +33,6 @@ coverage/
 *.tsbuildinfo
 # Library pack artifact (created transiently during publish)
 *.tgz
+
+# Terrarium state (keys and passwords for local test accounts)
+.terrarium/

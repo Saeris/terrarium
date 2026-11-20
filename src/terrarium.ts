@@ -1,0 +1,318 @@
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { deriveDidFromGenesisOp, signOperation } from "@atcute/did-plc";
+import * as v from "valibot";
+import { startCirrus, type CirrusEngine } from "./engines/cirrus";
+import { keyFrom, newKey } from "./keys";
+import { createPlc } from "./plc";
+
+/**
+ * The sandbox: a PLC directory and one Cirrus PDS per account, all routed by origin through one `fetch`, so nothing they do to each other leaves the process unless something is listening on a port.
+ *
+ * Accounts are made on demand (`createAccount`), each a real did:plc on its own PDS, and seeded with records (`seed`). With a directory, all of it survives a restart: same DIDs, same keys, same records.
+ */
+
+export const DEFAULT_HOST = "127.0.0.1";
+export const DEFAULT_PORTS = { plc: 2582, pds: 2600 } as const;
+
+/** Test accounts have a known password unless asked otherwise: this is a sandbox, and whatever drives it needs to sign in. */
+export const DEFAULT_PASSWORD = "password";
+
+const nameSchema = v.pipe(
+  v.string(),
+  v.regex(
+    /^[a-z][a-z0-9-]{0,29}$/u,
+    "An account name is lowercase letters, digits and dashes, starting with a letter."
+  )
+);
+
+const storedAccountSchema = v.object({
+  name: nameSchema,
+  did: v.string(),
+  handle: v.string(),
+  /** The PDS's origin, as the DID document names it. */
+  endpoint: v.string(),
+  password: v.string(),
+  /** The repo's signing key, hex: Cirrus's `SIGNING_KEY`. */
+  signingKey: v.string(),
+  /** The key that controls the DID at the PLC directory, hex. Terrarium holds it, so it can move an account or change its handle. */
+  rotationKey: v.string()
+});
+
+const stateSchema = v.object({
+  version: v.literal(1),
+  accounts: v.array(storedAccountSchema)
+});
+
+type StoredAccount = v.InferOutput<typeof storedAccountSchema>;
+
+/** An account as callers see it: everything needed to use it, nothing that controls it. */
+export interface Account {
+  readonly name: string;
+  readonly did: string;
+  readonly handle: string;
+  /** The PDS's URL. */
+  readonly endpoint: string;
+  readonly password: string;
+}
+
+export interface TerrariumOptions {
+  /** Where to keep accounts, the PLC log and each PDS's data. In memory when left out. */
+  readonly dir?: string;
+  /** The host every service is addressed by. */
+  readonly host?: string;
+  readonly ports?: { readonly plc: number; readonly pds: number };
+  /** Have each PDS answer on its own port, for clients outside this process. */
+  readonly listen?: boolean;
+}
+
+export interface NewAccount {
+  /** Short name for the account: `alice` makes `alice.test`. */
+  readonly name: string;
+  readonly handle?: string | undefined;
+  readonly password?: string | undefined;
+}
+
+/** A record to put in an account's repo. `$type` defaults to the collection. */
+export interface SeedRecord {
+  readonly collection: string;
+  readonly rkey?: string | undefined;
+  readonly record: Readonly<Record<string, unknown>>;
+}
+
+export interface Seeded {
+  readonly uri: string;
+  readonly cid: string;
+}
+
+export interface Terrarium {
+  /** The PLC directory's URL: give it to anything that resolves did:plc. */
+  readonly plcUrl: string;
+  /** Any request to any service in the sandbox, routed by its origin. Anything else is refused, never sent to the network. */
+  fetch(request: Request): Promise<Response>;
+  accounts(): readonly Account[];
+  account(name: string): Account | undefined;
+  createAccount(account: NewAccount): Promise<Account>;
+  /** Write records to an account's repo, as the account. */
+  seed(name: string, records: readonly SeedRecord[]): Promise<Seeded[]>;
+  dispose(): Promise<void>;
+}
+
+/** The most writes one `applyWrites` takes. */
+const BATCH = 200;
+
+const publicView = ({
+  name,
+  did,
+  handle,
+  endpoint,
+  password
+}: StoredAccount): Account => ({ name, did, handle, endpoint, password });
+
+const appliedSchema = v.object({
+  results: v.array(v.object({ uri: v.string(), cid: v.string() }))
+});
+
+export const createTerrarium = async ({
+  dir,
+  host = DEFAULT_HOST,
+  ports = DEFAULT_PORTS,
+  listen = false
+}: TerrariumOptions = {}): Promise<Terrarium> => {
+  const stateFile = dir && join(dir, "terrarium.json");
+
+  if (dir) {
+    await mkdir(dir, { recursive: true });
+  }
+
+  const plcUrl = `http://${host}:${String(ports.plc)}`;
+  const plc = await createPlc(dir ? { file: join(dir, "plc.json") } : {});
+  const stored: StoredAccount[] = stateFile
+    ? v.parse(
+        stateSchema,
+        JSON.parse(
+          await readFile(stateFile, "utf8").catch(
+            () => '{"version":1,"accounts":[]}'
+          )
+        )
+      ).accounts
+    : [];
+  const engines = new Map<string, CirrusEngine>();
+
+  const save = async (): Promise<void> => {
+    if (!stateFile) {
+      return;
+    }
+
+    await writeFile(
+      `${stateFile}.tmp`,
+      JSON.stringify({ version: 1, accounts: stored }, null, 2)
+    );
+    await rename(`${stateFile}.tmp`, stateFile);
+  };
+
+  const route = async (request: Request): Promise<Response> => {
+    const { origin } = new URL(request.url);
+
+    if (origin === plcUrl) {
+      return plc.fetch(request);
+    }
+
+    const engine = engines.get(origin);
+
+    return engine
+      ? engine.fetch(request)
+      : new Response(`Terrarium has no service at ${origin}.`, {
+          status: 502
+        });
+  };
+
+  const start = async (account: StoredAccount): Promise<void> => {
+    const endpoint = new URL(account.endpoint);
+
+    engines.set(
+      endpoint.origin,
+      await startCirrus({
+        account: {
+          did: account.did,
+          handle: account.handle,
+          hostname: endpoint.host,
+          password: account.password,
+          signingKey: account.signingKey
+        },
+        ...(dir && { persist: resolve(dir, "pds", account.name) }),
+        outbound: route,
+        ...(listen && {
+          listen: { host: endpoint.hostname, port: Number(endpoint.port) }
+        })
+      })
+    );
+  };
+
+  // One at a time: each is its own workerd.
+  for (const account of stored) {
+    await start(account);
+  }
+
+  return {
+    plcUrl,
+    fetch: route,
+    accounts: () => stored.map(publicView),
+    account(name) {
+      const found = stored.find((account) => account.name === name);
+
+      return found && publicView(found);
+    },
+    async createAccount({ name, handle, password = DEFAULT_PASSWORD }) {
+      v.parse(nameSchema, name);
+
+      if (stored.some((account) => account.name === name)) {
+        throw new Error(`There's already an account called ${name}.`);
+      }
+
+      const port = Math.max(
+        ports.pds - 1,
+        ...stored.map((account) => Number(new URL(account.endpoint).port))
+      );
+      const endpoint = `http://${host}:${String(port + 1)}`;
+      const signingKey = await newKey();
+      const rotationKey = await newKey();
+      const genesis = await signOperation(
+        {
+          type: "plc_operation",
+          prev: null,
+          alsoKnownAs: [`at://${handle ?? `${name}.test`}`],
+          rotationKeys: [
+            await (await keyFrom(rotationKey)).exportPublicKey("did")
+          ],
+          verificationMethods: {
+            atproto: await (await keyFrom(signingKey)).exportPublicKey("did")
+          },
+          services: {
+            atproto_pds: { type: "AtprotoPersonalDataServer", endpoint }
+          }
+        },
+        await keyFrom(rotationKey)
+      );
+      const did = await deriveDidFromGenesisOp(genesis);
+      const registered = await plc.fetch(
+        new Request(`${plcUrl}/${did}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(genesis)
+        })
+      );
+
+      if (!registered.ok) {
+        throw new Error(
+          `The PLC directory refused ${did}: ${await registered.text()}`
+        );
+      }
+
+      const account: StoredAccount = {
+        name,
+        did,
+        handle: handle ?? `${name}.test`,
+        endpoint,
+        password,
+        signingKey,
+        rotationKey
+      };
+
+      await start(account);
+      stored.push(account);
+      await save();
+
+      return publicView(account);
+    },
+    async seed(name, records) {
+      const account = stored.find((candidate) => candidate.name === name);
+      const engine = account && engines.get(new URL(account.endpoint).origin);
+
+      if (!account || !engine) {
+        throw new Error(`There's no account called ${name}.`);
+      }
+
+      const seeded: Seeded[] = [];
+
+      for (let at = 0; at < records.length; at += BATCH) {
+        const response = await engine.fetch(
+          new Request(`${account.endpoint}/xrpc/com.atproto.repo.applyWrites`, {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${engine.authToken}`,
+              "content-type": "application/json"
+            },
+            body: JSON.stringify({
+              repo: account.did,
+              writes: records
+                .slice(at, at + BATCH)
+                .map(({ collection, rkey, record }) => ({
+                  $type: "com.atproto.repo.applyWrites#create",
+                  collection,
+                  ...(rkey !== undefined && { rkey }),
+                  value: { $type: collection, ...record }
+                }))
+            })
+          })
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            `${account.handle}'s PDS refused the seed: ${await response.text()}`
+          );
+        }
+
+        seeded.push(...v.parse(appliedSchema, await response.json()).results);
+      }
+
+      return seeded;
+    },
+    async dispose() {
+      await Promise.all(
+        [...engines.values()].map(async (engine) => engine.dispose())
+      );
+      engines.clear();
+    }
+  };
+};

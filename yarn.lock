@@ -43,7 +43,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@atcute/cbor@npm:^2.2.8, @atcute/cbor@npm:^2.3.3, @atcute/cbor@npm:^2.3.8":
+"@atcute/cbor@npm:^2.2.8, @atcute/cbor@npm:^2.3.3, @atcute/cbor@npm:^2.3.7, @atcute/cbor@npm:^2.3.8":
   version: 2.3.8
   resolution: "@atcute/cbor@npm:2.3.8"
   dependencies:
@@ -56,7 +56,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@atcute/cid@npm:^2.3.0, @atcute/cid@npm:^2.4.1, @atcute/cid@npm:^2.5.0":
+"@atcute/cid@npm:^2.3.0, @atcute/cid@npm:^2.4.1, @atcute/cid@npm:^2.4.2, @atcute/cid@npm:^2.5.0":
   version: 2.5.0
   resolution: "@atcute/cid@npm:2.5.0"
   dependencies:
@@ -78,7 +78,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@atcute/crypto@npm:^2.4.1":
+"@atcute/crypto@npm:^2.4.1, @atcute/crypto@npm:^2.4.4":
   version: 2.4.4
   resolution: "@atcute/crypto@npm:2.4.4"
   dependencies:
@@ -86,6 +86,28 @@ __metadata:
     "@atcute/uint8array": "npm:^1.1.5"
     "@noble/secp256k1": "npm:^3.1.0"
   checksum: 10/fb7069c21f1015f0a6e4b73d698cb110719657814dac3ed22f7f4aac4395f9efedcdfc1641a08c17fda9a60bbb298e92c8a2590c4d3682c52f19ef05bfb58a5f
+  languageName: node
+  linkType: hard
+
+"@atcute/did-plc@npm:1.0.2":
+  version: 1.0.2
+  resolution: "@atcute/did-plc@npm:1.0.2"
+  dependencies:
+    "@atcute/cbor": "npm:^2.3.7"
+    "@atcute/cid": "npm:^2.4.2"
+    "@atcute/crypto": "npm:^2.4.4"
+    "@atcute/identity": "npm:^2.0.2"
+    "@atcute/lexicons": "npm:^2.1.0"
+    "@atcute/multibase": "npm:^1.2.5"
+    "@atcute/uint8array": "npm:^1.1.5"
+    "@atcute/util-fetch": "npm:^2.0.2"
+    valibot: "npm:^1.5.0"
+  peerDependencies:
+    "@atcute/cbor": ^2.0.0
+    "@atcute/cid": ^2.0.0
+    "@atcute/identity": ^2.0.0
+    "@atcute/lexicons": ^2.0.0
+  checksum: 10/f9063ccb90beb0d8f731e099076396d20fc85fc3d0db5cda6bd2b1a258b2d38d063e025ba712afb4981701d199afc7d3f200a50da969ee9e8df2d323923cc197
   languageName: node
   linkType: hard
 
@@ -112,6 +134,18 @@ __metadata:
   peerDependencies:
     "@atcute/lexicons": ^1.0.0
   checksum: 10/207ba23cf4212f132a7b322a6da4ec243b1b6841c6548e589a41d5e7fc7e214c865890089e3e14ab0b8f16922f9ec257a60ec062145c537f7b7de6aa30052d0a
+  languageName: node
+  linkType: hard
+
+"@atcute/identity@npm:^2.0.2":
+  version: 2.0.2
+  resolution: "@atcute/identity@npm:2.0.2"
+  dependencies:
+    "@atcute/lexicons": "npm:^2.0.3"
+    valibot: "npm:^1.4.2"
+  peerDependencies:
+    "@atcute/lexicons": ^2.0.0
+  checksum: 10/8050539e9ef6d43e739777b95d8851d355d634e15e57e20f1333477e92e88b8c6c0fa4103b1e6b60f95fb2f318a52176b824809a1eb8ab047ad55193cfd531b9
   languageName: node
   linkType: hard
 
@@ -158,6 +192,19 @@ __metadata:
     "@standard-schema/spec": "npm:^1.1.0"
     esm-env: "npm:^1.2.2"
   checksum: 10/ee866bdc20179a741b31ca4d768ada36db478892b29615bec695a2c5b2536ceb7087925d3ccfacfbdd6a139afea0009838ed579e4d0dd5b145dc023b2e942f57
+  languageName: node
+  linkType: hard
+
+"@atcute/lexicons@npm:^2.0.3, @atcute/lexicons@npm:^2.1.0":
+  version: 2.1.1
+  resolution: "@atcute/lexicons@npm:2.1.1"
+  dependencies:
+    "@atcute/uint8array": "npm:^1.1.5"
+    "@atcute/util-text": "npm:^1.3.4"
+    "@oomfware/eval": "npm:^0.1.0"
+    "@standard-schema/spec": "npm:^1.1.0"
+    esm-env: "npm:^1.2.2"
+  checksum: 10/960d7b52efeb5b598b88a30a8e249e9655f807f8284e01ee79a1e560b13c3a5463b4d6ebd01c4418e5cd387a94321a56aaaeb087ee927ca4dc2d47595d53fba5
   languageName: node
   linkType: hard
 
@@ -235,7 +282,16 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@atcute/util-text@npm:^1.3.1":
+"@atcute/util-fetch@npm:^2.0.2":
+  version: 2.1.0
+  resolution: "@atcute/util-fetch@npm:2.1.0"
+  dependencies:
+    valibot: "npm:^1.5.0"
+  checksum: 10/bd76b43e52f185fd83553cb580eae389662d8db61644ddce07086b1ceded43a5acf2b7675045b836e6b6946cf99ff629acdf7582663473a0618a6706d5d5bddd
+  languageName: node
+  linkType: hard
+
+"@atcute/util-text@npm:^1.3.1, @atcute/util-text@npm:^1.3.4":
   version: 1.3.4
   resolution: "@atcute/util-text@npm:1.3.4"
   dependencies:
@@ -321,17 +377,6 @@ __metadata:
     "@noble/hashes": "npm:^1.6.1"
     uint8arrays: "npm:3.0.0"
   checksum: 10/443b4a80e94e59b1ec3cab4ec55e939ed04f29a163a536431355a749f4fa90c24182f052f9b5cf9ee8123ee0930d7da7faaa6863ddb77441ddbab6b866bada79
-  languageName: node
-  linkType: hard
-
-"@atproto/crypto@npm:^0.5.7":
-  version: 0.5.7
-  resolution: "@atproto/crypto@npm:0.5.7"
-  dependencies:
-    "@noble/curves": "npm:^1.7.0"
-    "@noble/hashes": "npm:^1.6.1"
-    uint8arrays: "npm:^5.0.0"
-  checksum: 10/2bdd1162c86cb3e8e7b5ac93313e6fe78c5ef4957c2b8eed53e4c19c9956222a4098bf08e3b68a2a66d1c533b157afc7e4bfcd4f282d63e064cf38efa3fd6689
   languageName: node
   linkType: hard
 
@@ -1614,6 +1659,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@oomfware/eval@npm:^0.1.0":
+  version: 0.1.0
+  resolution: "@oomfware/eval@npm:0.1.0"
+  checksum: 10/4730e73e99d9e00495cc8fb3b2f7f0b5e04bc211f17358905557490f898f98f8669ff42a17c735a623acfdd80d720c3852a47a0859c2936798c05d3ea655522f
+  languageName: node
+  linkType: hard
+
 "@oxc-project/runtime@npm:=0.155.0":
   version: 0.155.0
   resolution: "@oxc-project/runtime@npm:0.155.0"
@@ -2162,7 +2214,10 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@saeris/terrarium@workspace:."
   dependencies:
-    "@atproto/crypto": "npm:^0.5.7"
+    "@atcute/cbor": "npm:^2.3.8"
+    "@atcute/cid": "npm:^2.5.0"
+    "@atcute/crypto": "npm:^2.4.4"
+    "@atcute/did-plc": "npm:1.0.2"
     "@getcirrus/pds": "npm:0.19.0"
     "@saeris/configs": "npm:^1.6.1"
     "@types/node": "npm:^26.6.6"
@@ -2171,9 +2226,12 @@ __metadata:
     bcryptjs: "npm:^3.0.3"
     miniflare: "npm:4.20260730.0"
     typescript: "npm:^6.0.3"
+    valibot: "npm:^1.5.0"
     vite-plus: "catalog:"
     vitest: "catalog:"
     wrangler: "npm:4.136.1"
+  bin:
+    terrarium: ./dist/cli.mjs
   languageName: unknown
   linkType: soft
 
@@ -4374,6 +4432,18 @@ __metadata:
   version: 0.17.3
   resolution: "unicode-segmenter@npm:0.17.3"
   checksum: 10/49b23ec4dac218a89eb61a53de0e9620c9c49429e1ea8389e9ac25ac289d9c255ff25b519110aee038d88c9dd1d7f7a0361eda70bfc63d70a95d91df89c1fa72
+  languageName: node
+  linkType: hard
+
+"valibot@npm:^1.4.2, valibot@npm:^1.5.0":
+  version: 1.5.0
+  resolution: "valibot@npm:1.5.0"
+  peerDependencies:
+    typescript: ">=5"
+  peerDependenciesMeta:
+    typescript:
+      optional: true
+  checksum: 10/87714d10c13d78202cbc01cdff3595921010a7e40a0b3cd1aa76ea78e5b394c901d5151db76be9d3233938ef26d50e3441c9733e876a497ee6b4cd932f41ab4c
   languageName: node
   linkType: hard
 
