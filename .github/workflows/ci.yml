@@ -30,4 +30,6 @@ jobs:
       - run: vp check
       # The preload is tested as a built file, in a child process.
       - run: vp pack
+      # playwright-core brings no browser of its own: the one its version drives, headless.
+      - run: yarn playwright-core install --with-deps --only-shell chromium
       - run: vp test
