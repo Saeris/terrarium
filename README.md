@@ -198,7 +198,8 @@ Add your state directory to `.gitignore`: it holds every account's keys and pass
 
 ## 🚧 Not yet
 
-- **Apps on Workers.** An app running under Miniflare or `wrangler dev` makes its requests from `workerd`, where neither interceptor reaches; Miniflare's `outboundService` is the way in.
+- **WebSockets out of a Worker**, such as a Worker following Jetstream: `outbound` answers HTTP only.
+- **`wrangler dev` itself**, which has no outbound hook: run the Worker under Miniflare instead (Wrangler's `unstable_getMiniflareWorkerOptions` turns a `wrangler.jsonc` into its options).
 - **The reference PDS** as a second engine, for accounts that must behave exactly like bsky.social's, and for atproto spaces once their beta lands.
 - **Node's own DNS.** `_atproto` TXT lookups through `node:dns` aren't intercepted, only DNS-over-HTTPS and `/.well-known/atproto-did`.
 - **Other Bluesky services**, such as the AppView's `public.api.bsky.app`.
