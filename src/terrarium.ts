@@ -3,17 +3,27 @@ import { join, resolve } from "node:path";
 import { deriveDidFromGenesisOp, signOperation } from "@atcute/did-plc";
 import * as v from "valibot";
 import { startCirrus, type CirrusEngine } from "./engines/cirrus";
+import { createJetstream, filterFrom, type Jetstream } from "./jetstream";
 import { keyFrom, newKey } from "./keys";
 import { createPlc } from "./plc";
 
 /**
- * The sandbox: a PLC directory and one Cirrus PDS per account, all routed by origin through one `fetch`, so nothing they do to each other leaves the process unless something is listening on a port.
+ * The sandbox: a PLC directory, one Cirrus PDS per account, and a Jetstream fed by their firehoses, all routed by origin through one `fetch`, so nothing they do to each other leaves the process unless something is listening on a port.
  *
- * Accounts are made on demand (`createAccount`), each a real did:plc on its own PDS, and seeded with records (`seed`). With a directory, all of it survives a restart: same DIDs, same keys, same records.
+ * Accounts are made on demand (`createAccount`), each a real did:plc on its own PDS, and seeded with records (`seed`). With a directory, all of it survives a restart: same DIDs, same keys, same records. Jetstream's history doesn't: it starts empty, as a real one would for a client that's been away longer than its retention.
  */
 
 export const DEFAULT_HOST = "127.0.0.1";
-export const DEFAULT_PORTS = { plc: 2582, pds: 2600 } as const;
+export const DEFAULT_PORTS = { plc: 2582, jetstream: 2584, pds: 2600 } as const;
+
+/** The part of a WebSocket a client reads from, as browsers and Node have it. What `connect` gives in place of one. */
+export interface SocketLike {
+  onopen: (() => void) | null;
+  onmessage: ((event: { data: string }) => void) | null;
+  onclose: (() => void) | null;
+  onerror: (() => void) | null;
+  close(): void;
+}
 
 /** Test accounts have a known password unless asked otherwise: this is a sandbox, and whatever drives it needs to sign in. */
 export const DEFAULT_PASSWORD = "password";
@@ -61,7 +71,11 @@ export interface TerrariumOptions {
   readonly dir?: string;
   /** The host every service is addressed by. */
   readonly host?: string;
-  readonly ports?: { readonly plc: number; readonly pds: number };
+  readonly ports?: {
+    readonly plc: number;
+    readonly jetstream: number;
+    readonly pds: number;
+  };
   /** Have each PDS answer on its own port, for clients outside this process. */
   readonly listen?: boolean;
 }
@@ -88,8 +102,14 @@ export interface Seeded {
 export interface Terrarium {
   /** The PLC directory's URL: give it to anything that resolves did:plc. */
   readonly plcUrl: string;
+  /** Jetstream's subscribe URL: give it to anything that follows changes. */
+  readonly jetstreamUrl: string;
+  /** Jetstream itself, for subscribing in-process and for switching its faults on and off. */
+  readonly jetstream: Jetstream;
   /** Any request to any service in the sandbox, routed by its origin. Anything else is refused, never sent to the network. */
   fetch(request: Request): Promise<Response>;
+  /** A WebSocket to Jetstream without a socket, for clients that take a `connect` function. */
+  connect(url: string): SocketLike;
   accounts(): readonly Account[];
   account(name: string): Account | undefined;
   createAccount(account: NewAccount): Promise<Account>;
@@ -138,6 +158,31 @@ export const createTerrarium = async ({
       ).accounts
     : [];
   const engines = new Map<string, CirrusEngine>();
+  const jetstream = createJetstream();
+  const jetstreamOrigin = `http://${host}:${String(ports.jetstream)}`;
+  const jetstreamUrl = `ws://${host}:${String(ports.jetstream)}/subscribe`;
+  let disposed = false;
+
+  /** Feed a PDS's firehose to Jetstream, and pick it up again if it drops, for as long as the sandbox runs. */
+  const follow = async (
+    engine: CirrusEngine,
+    endpoint: string
+  ): Promise<void> => {
+    const socket = await engine.upgrade(
+      `${endpoint}/xrpc/com.atproto.sync.subscribeRepos`
+    );
+
+    socket.addEventListener("message", (event) => {
+      if (typeof event.data !== "string") {
+        jetstream.ingest(new Uint8Array(event.data));
+      }
+    });
+    socket.addEventListener("close", () => {
+      if (!disposed && engines.get(new URL(endpoint).origin) === engine) {
+        void follow(engine, endpoint);
+      }
+    });
+  };
 
   const save = async (): Promise<void> => {
     if (!stateFile) {
@@ -158,6 +203,12 @@ export const createTerrarium = async ({
       return plc.fetch(request);
     }
 
+    if (origin === jetstreamOrigin) {
+      return new Response("Jetstream speaks WebSocket: use `connect`.", {
+        status: 426
+      });
+    }
+
     const engine = engines.get(origin);
 
     return engine
@@ -169,24 +220,64 @@ export const createTerrarium = async ({
 
   const start = async (account: StoredAccount): Promise<void> => {
     const endpoint = new URL(account.endpoint);
-
-    engines.set(
-      endpoint.origin,
-      await startCirrus({
-        account: {
-          did: account.did,
-          handle: account.handle,
-          hostname: endpoint.host,
-          password: account.password,
-          signingKey: account.signingKey
-        },
-        ...(dir && { persist: resolve(dir, "pds", account.name) }),
-        outbound: route,
-        ...(listen && {
-          listen: { host: endpoint.hostname, port: Number(endpoint.port) }
-        })
+    const engine = await startCirrus({
+      account: {
+        did: account.did,
+        handle: account.handle,
+        hostname: endpoint.host,
+        password: account.password,
+        signingKey: account.signingKey
+      },
+      ...(dir && { persist: resolve(dir, "pds", account.name) }),
+      outbound: route,
+      ...(listen && {
+        listen: { host: endpoint.hostname, port: Number(endpoint.port) }
       })
-    );
+    });
+
+    engines.set(endpoint.origin, engine);
+    await follow(engine, endpoint.origin);
+  };
+
+  const connect = (url: string): SocketLike => {
+    const target = new URL(url);
+    let stop: (() => void) | undefined;
+    const socket: SocketLike = {
+      onopen: null,
+      onmessage: null,
+      onclose: null,
+      onerror: null,
+      close() {
+        stop?.();
+        stop = undefined;
+        queueMicrotask(() => socket.onclose?.());
+      }
+    };
+
+    // Opened on the next tick, as a real socket is, so a client can set its handlers first.
+    queueMicrotask(() => {
+      if (
+        `http://${target.host}` !== jetstreamOrigin ||
+        target.pathname !== "/subscribe"
+      ) {
+        socket.onerror?.();
+        socket.onclose?.();
+
+        return;
+      }
+
+      socket.onopen?.();
+      // Each message in a later task, as the network delivers them: a replay mustn't arrive before the client has finished reacting to the open.
+      stop = jetstream.subscribe(filterFrom(target), (event) => {
+        const data = JSON.stringify(event);
+
+        setTimeout(() => {
+          socket.onmessage?.({ data });
+        }, 0);
+      });
+    });
+
+    return socket;
   };
 
   // One at a time: each is its own workerd.
@@ -196,7 +287,10 @@ export const createTerrarium = async ({
 
   return {
     plcUrl,
+    jetstreamUrl,
+    jetstream,
     fetch: route,
+    connect,
     accounts: () => stored.map(publicView),
     account(name) {
       const found = stored.find((account) => account.name === name);
@@ -309,6 +403,7 @@ export const createTerrarium = async ({
       return seeded;
     },
     async dispose() {
+      disposed = true;
       await Promise.all(
         [...engines.values()].map(async (engine) => engine.dispose())
       );

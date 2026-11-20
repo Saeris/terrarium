@@ -21,6 +21,17 @@ export {
   type NewAccount,
   type Seeded,
   type SeedRecord,
+  type SocketLike,
   type Terrarium,
   type TerrariumOptions
 } from "./terrarium";
+export {
+  createJetstream,
+  filterFrom,
+  type AccountEvent,
+  type CommitEvent,
+  type Filter,
+  type IdentityEvent,
+  type Jetstream,
+  type JetstreamEvent
+} from "./jetstream";

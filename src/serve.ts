@@ -1,18 +1,27 @@
 import { createServer } from "node:http";
 import { buffer } from "node:stream/consumers";
+import { WebSocketServer, type WebSocket } from "ws";
 
-/** A `fetch` handler on a socket, for the parts of Terrarium that aren't already listening (the control API, the PLC directory). */
+/** A `fetch` handler on a socket, for the parts of Terrarium that aren't already listening (the control API, the PLC directory, Jetstream). */
 
 export interface Listening {
   readonly url: string;
   close(): Promise<void>;
 }
 
+export interface ServeOptions {
+  readonly host: string;
+  readonly port: number;
+  /** Accept WebSocket upgrades, and hand each socket over with the URL it was opened with. */
+  readonly upgrade?: (url: URL, socket: WebSocket) => void;
+}
+
 export const serve = async (
   handler: (request: Request) => Promise<Response>,
-  { host, port }: { readonly host: string; readonly port: number }
+  { host, port, upgrade }: ServeOptions
 ): Promise<Listening> => {
   const origin = `http://${host}:${String(port)}`;
+  const sockets = upgrade && new WebSocketServer({ noServer: true });
   const server = createServer((incoming, outgoing) => {
     void (async (): Promise<void> => {
       const headers = new Headers();
@@ -42,6 +51,14 @@ export const serve = async (
     })();
   });
 
+  if (sockets) {
+    server.on("upgrade", (incoming, stream, head) => {
+      sockets.handleUpgrade(incoming, stream, head, (socket) => {
+        upgrade(new URL(incoming.url ?? "/", origin), socket);
+      });
+    });
+  }
+
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, host, resolve);
@@ -51,6 +68,12 @@ export const serve = async (
     url: origin,
     close: async () =>
       new Promise<void>((resolve) => {
+        // Open sockets would hold the server open forever.
+        for (const socket of sockets?.clients ?? []) {
+          socket.terminate();
+        }
+
+        server.closeAllConnections();
         server.close(() => {
           resolve();
         });

@@ -1,4 +1,5 @@
 import { control } from "./control";
+import { filterFrom } from "./jetstream";
 import { serve } from "./serve";
 import {
   createTerrarium,
@@ -17,13 +18,18 @@ export interface ServerOptions {
   readonly dir?: string;
   readonly host?: string;
   readonly port?: number;
-  readonly ports?: { readonly plc: number; readonly pds: number };
+  readonly ports?: {
+    readonly plc: number;
+    readonly jetstream: number;
+    readonly pds: number;
+  };
 }
 
 export interface Server {
   /** The control API. */
   readonly url: string;
   readonly plcUrl: string;
+  readonly jetstreamUrl: string;
   readonly terrarium: Terrarium;
   close(): Promise<void>;
 }
@@ -52,13 +58,31 @@ export const startServer = async ({
     },
     { host, port: ports.plc }
   );
+  const jetstream = await serve(async (request) => terrarium.fetch(request), {
+    host,
+    port: ports.jetstream,
+    upgrade(url, socket) {
+      if (url.pathname !== "/subscribe") {
+        socket.close(1008, "Jetstream subscribes at /subscribe.");
+
+        return;
+      }
+
+      const stop = terrarium.jetstream.subscribe(filterFrom(url), (event) => {
+        socket.send(JSON.stringify(event));
+      });
+
+      socket.on("close", stop);
+    }
+  });
 
   return {
     url: api.url,
     plcUrl: terrarium.plcUrl,
+    jetstreamUrl: terrarium.jetstreamUrl,
     terrarium,
     async close() {
-      await Promise.all([api.close(), plc.close()]);
+      await Promise.all([api.close(), plc.close(), jetstream.close()]);
       await terrarium.dispose();
     }
   };

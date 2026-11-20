@@ -11,7 +11,7 @@ An Atmosphere in a box: a PLC directory and as many PDSes as you need on your ma
 
 ---
 
-Every account is a real `did:plc`, registered with a local PLC directory that enforces the same rules as `plc.directory`, on its own [Cirrus](https://github.com/ascorbic/cirrus) PDS running on `workerd`, the runtime Cloudflare runs it on. Nothing it does leaves your machine, no DID reaches the public directory, and everything survives a restart.
+Every account is a real `did:plc`, registered with a local PLC directory that enforces the same rules as `plc.directory`, on its own [Cirrus](https://github.com/ascorbic/cirrus) PDS running on `workerd`, the runtime Cloudflare runs it on. A Jetstream follows every PDS's firehose. Nothing it does leaves your machine, no DID reaches the public directory, and everything survives a restart.
 
 ## 📦 Installation
 
@@ -29,7 +29,7 @@ Start a sandbox, and leave it running:
 terrarium start                       # keeps its state in ./.terrarium
 ```
 
-At a terminal it prints a summary. Run from a script or by an agent, it prints one line of JSON once it's ready, with the control API's and the PLC directory's URLs and every account.
+At a terminal it prints a summary. Run from a script or by an agent, it prints one line of JSON once it's ready, with the control API's, the PLC directory's and Jetstream's URLs and every account.
 
 Then, from another shell, make accounts as you need them and fill them with records. Every command prints JSON, and `terrarium --help` (or `--help` after any command) says what it takes.
 
@@ -52,7 +52,21 @@ An account comes back as:
 }
 ```
 
-Point your app's PLC resolver at `http://127.0.0.1:2582`, and talk to each account's PDS at its `endpoint`. Signing in with its password works (`com.atproto.server.createSession`).
+Point your app's PLC resolver at `http://127.0.0.1:2582` and its Jetstream client at `ws://127.0.0.1:2584/subscribe`, and talk to each account's PDS at its `endpoint`. Signing in with its password works (`com.atproto.server.createSession`).
+
+### Jetstream
+
+The same events and query parameters as Bluesky's Jetstream (`wantedDids`, `wantedCollections` with `.*` prefixes, and a microsecond `cursor` to replay from), fed straight from every PDS's firehose. It keeps the last 10,000 events for replaying; its history starts empty after a restart.
+
+It can also misbehave on purpose, as a real relay does, so you can test what your app does about it:
+
+```bash
+terrarium jetstream pause             # hold every event back, as a relay that has fallen behind
+terrarium jetstream resume            # deliver what was held back
+terrarium jetstream ignore alice      # never carry alice's events, as a relay that drops her PDS
+terrarium jetstream heed alice        # carry them again (what was missed stays missed)
+terrarium jetstream                   # what's switched on
+```
 
 ### Seeding
 
@@ -75,13 +89,16 @@ A seed file is a list of records, or an object with a `records` list. `$type` de
 
 The CLI is a thin client for the running sandbox's control API on `http://127.0.0.1:2580`, which `curl` can use as well:
 
-| Request                                         | Does                                        |
-| ----------------------------------------------- | ------------------------------------------- |
-| `GET /accounts`                                 | Every account                               |
-| `POST /accounts` `{ name, handle?, password? }` | A new account on its own PDS                |
-| `GET /accounts/:name`                           | One account                                 |
-| `POST /accounts/:name/records`                  | Seed records, as in a seed file             |
-| `GET /health`                                   | The PLC URL and how many accounts there are |
+| Request                                         | Does                                                        |
+| ----------------------------------------------- | ----------------------------------------------------------- |
+| `GET /accounts`                                 | Every account                                               |
+| `POST /accounts` `{ name, handle?, password? }` | A new account on its own PDS                                |
+| `GET /accounts/:name`                           | One account                                                 |
+| `POST /accounts/:name/records`                  | Seed records, as in a seed file                             |
+| `GET /jetstream`                                | Which faults are switched on                                |
+| `POST /jetstream/pause`, `/jetstream/resume`    | Hold events back, then release them                         |
+| `POST /jetstream/ignore/:name`, `/heed/:name`   | Stop, then start, carrying an account                       |
+| `GET /health`                                   | The PLC and Jetstream URLs, and how many accounts there are |
 
 ### In tests
 
@@ -106,7 +123,7 @@ const response = await terrarium.fetch(
 await terrarium.dispose();
 ```
 
-Hand `terrarium.fetch` to any client that accepts a custom `fetch`. Requests to anything outside the sandbox are refused with a 502, never sent to the network.
+Hand `terrarium.fetch` to any client that accepts a custom `fetch`, and `terrarium.connect` to any that takes a function to open a WebSocket: it opens one to Jetstream without a socket. Requests to anything outside the sandbox are refused with a 502, never sent to the network. `terrarium.jetstream` has the same fault switches as the CLI.
 
 ## 🎛 Configuration
 
@@ -116,6 +133,7 @@ Hand `terrarium.fetch` to any client that accepts a custom `fetch`. Requests to 
 | Host every service is addressed by | `--host` | `127.0.0.1`                                                    |
 | Control API port                   | `--port` | `2580`                                                         |
 | PLC directory port                 |          | `2582`                                                         |
+| Jetstream port                     |          | `2584`                                                         |
 | First PDS port                     |          | `2600`, then one more per account                              |
 
 Add your state directory to `.gitignore`: it holds every account's keys and password.
@@ -123,7 +141,6 @@ Add your state directory to `.gitignore`: it holds every account's keys and pass
 ## 🚧 Not yet
 
 - **OAuth.** Cirrus names itself `https://<host>`, so OAuth against these plain-HTTP endpoints doesn't work yet. HTTPS names are next.
-- **Jetstream**, for apps that follow changes.
 - **The reference PDS** as a second engine, for accounts that must behave exactly like bsky.social's.
 - **Handle resolution** through DNS: handles resolve from the PDS and DID document, not from `_atproto` records.
 

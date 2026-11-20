@@ -8,6 +8,9 @@ import type { Terrarium } from "./terrarium";
  * - `POST /accounts` `{ name, handle?, password? }`: a new account on its own PDS.
  * - `GET /accounts/:name`
  * - `POST /accounts/:name/records` `[{ collection, rkey?, record }]`: write records to its repo.
+ * - `GET /jetstream`: whether it's paused, and which accounts it ignores.
+ * - `POST /jetstream/pause`, `POST /jetstream/resume`: hold events back, then release them, as a relay that falls behind and catches up.
+ * - `POST /jetstream/ignore/:name`, `POST /jetstream/heed/:name`: stop carrying an account's events, then start again, as a relay that drops a PDS.
  * - `GET /health`
  */
 
@@ -48,6 +51,39 @@ const problem = (error: unknown, status = 400): Response =>
     status
   );
 
+const jetstream = (
+  terrarium: Terrarium,
+  method: string,
+  action: string | undefined,
+  name: string | undefined
+): Response => {
+  const faults = terrarium.jetstream;
+
+  if (method === "GET" && (action === undefined || action === "")) {
+    return json(faults.state);
+  }
+
+  if (method === "POST" && (action === "pause" || action === "resume")) {
+    faults[action]();
+
+    return json(faults.state);
+  }
+
+  if (method === "POST" && (action === "ignore" || action === "heed")) {
+    const account = name === undefined ? undefined : terrarium.account(name);
+
+    if (!account) {
+      return problem(`There's no account called ${String(name)}.`, 404);
+    }
+
+    faults[action](account.did);
+
+    return json(faults.state);
+  }
+
+  return problem(`Jetstream has no ${String(action)}.`, 404);
+};
+
 export const control =
   (terrarium: Terrarium) =>
   async (request: Request): Promise<Response> => {
@@ -58,8 +94,13 @@ export const control =
       if (area === "health") {
         return json({
           plc: terrarium.plcUrl,
+          jetstream: terrarium.jetstreamUrl,
           accounts: terrarium.accounts().length
         });
+      }
+
+      if (area === "jetstream") {
+        return jetstream(terrarium, request.method, name, sub);
       }
 
       if (area !== "accounts") {

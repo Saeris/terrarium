@@ -28,6 +28,21 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@atcute/car@npm:6.1.1":
+  version: 6.1.1
+  resolution: "@atcute/car@npm:6.1.1"
+  dependencies:
+    "@atcute/cbor": "npm:^2.3.8"
+    "@atcute/cid": "npm:^2.5.0"
+    "@atcute/uint8array": "npm:^1.2.1"
+    "@atcute/varint": "npm:^2.0.2"
+  peerDependencies:
+    "@atcute/cbor": ^2.0.0
+    "@atcute/cid": ^2.0.0
+  checksum: 10/4fc6450a8f65cb0d6708561670a09d823339c11f422b96c5148794c0f2bfdb9bd8b1eb07ba82d20ef1911b1ddfcd977d699325da86b0d49371cb270e2dcdef7e
+  languageName: node
+  linkType: hard
+
 "@atcute/car@npm:^5.1.2":
   version: 5.1.2
   resolution: "@atcute/car@npm:5.1.2"
@@ -266,7 +281,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@atcute/uint8array@npm:^1.1.1, @atcute/uint8array@npm:^1.1.5, @atcute/uint8array@npm:^1.2.0":
+"@atcute/uint8array@npm:^1.1.1, @atcute/uint8array@npm:^1.1.5, @atcute/uint8array@npm:^1.2.0, @atcute/uint8array@npm:^1.2.1":
   version: 1.2.1
   resolution: "@atcute/uint8array@npm:1.2.1"
   checksum: 10/692e201874d0135b089d5d62d806bb413cd6ce3a1fe51c5e8e5336256bb11d4df52e8edebeff659916c0c54db33319c23bb5eda007e2415619270daa5e1d89c9
@@ -300,7 +315,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@atcute/varint@npm:^2.0.0":
+"@atcute/varint@npm:^2.0.0, @atcute/varint@npm:^2.0.2":
   version: 2.0.2
   resolution: "@atcute/varint@npm:2.0.2"
   checksum: 10/c7c313bb666bfb5f66b2429e9a4fb6f722b308de73cbbc778181c111e80efe55eee572de13589d349f78c2cc310abc75427ecf0abb44bb1275d51d26558cd3c5
@@ -2246,6 +2261,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@saeris/terrarium@workspace:."
   dependencies:
+    "@atcute/car": "npm:6.1.1"
     "@atcute/cbor": "npm:^2.3.8"
     "@atcute/cid": "npm:^2.5.0"
     "@atcute/crypto": "npm:^2.4.4"
@@ -2255,6 +2271,7 @@ __metadata:
     "@getcirrus/pds": "npm:0.19.0"
     "@saeris/configs": "npm:^1.6.1"
     "@types/node": "npm:^26.6.6"
+    "@types/ws": "npm:^8.18.2"
     "@varlock/bumpy": "npm:^1.19.0"
     "@vitest/coverage-v8": "catalog:"
     bcryptjs: "npm:^3.0.3"
@@ -2264,6 +2281,7 @@ __metadata:
     vite-plus: "catalog:"
     vitest: "catalog:"
     wrangler: "npm:4.136.1"
+    ws: "npm:^8.23.0"
   bin:
     terrarium: ./dist/cli.mjs
   languageName: unknown
@@ -2362,12 +2380,21 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/node@npm:^26.6.6":
+"@types/node@npm:*, @types/node@npm:^26.6.6":
   version: 26.6.6
   resolution: "@types/node@npm:26.6.6"
   dependencies:
     undici-types: "npm:~8.9.0"
   checksum: 10/07c6c6fc1f5cc89c700ac9ebcebd42b000fef234bf0b80e9461a8f077105f15faf16df95b83745e0c0e37338d1fbc28cb402ef27b5787fd7a57b492c926ff7ae
+  languageName: node
+  linkType: hard
+
+"@types/ws@npm:^8.18.2":
+  version: 8.18.2
+  resolution: "@types/ws@npm:8.18.2"
+  dependencies:
+    "@types/node": "npm:*"
+  checksum: 10/7d87483731222387ba7d49a752b7eca6c29baeb3439d9c0a2ebe57b06bad0ce868cd850f4794c81aa93a90b2a35d7673c9b0362e7b940aace446144c17a894c2
   languageName: node
   linkType: hard
 
@@ -4884,7 +4911,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ws@npm:^8.22.0":
+"ws@npm:^8.22.0, ws@npm:^8.23.0":
   version: 8.23.0
   resolution: "ws@npm:8.23.0"
   peerDependencies:

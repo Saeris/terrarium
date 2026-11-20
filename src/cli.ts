@@ -89,6 +89,33 @@ const app = command(
     argument(name("file"), schema(v.string())),
     url
   ),
+  command(
+    name("jetstream"),
+    description("Whether Jetstream is paused, and which accounts it ignores"),
+    url,
+    command(
+      name("pause"),
+      description(
+        "Hold every event back, as a relay that has fallen behind does"
+      ),
+      url
+    ),
+    command(name("resume"), description("Deliver what was held back"), url),
+    command(
+      name("ignore"),
+      description(
+        "Stop carrying an account's events, as a relay that drops its PDS does"
+      ),
+      argument(name("name"), schema(v.string())),
+      url
+    ),
+    command(
+      name("heed"),
+      description("Carry an ignored account's events again"),
+      argument(name("name"), schema(v.string())),
+      url
+    )
+  ),
   command(name("health"), description("Check the sandbox is up"), url)
 );
 
@@ -140,7 +167,9 @@ const start = async ({
 
   if (human) {
     progress?.stop(`Sandbox running, ${String(accounts.length)} accounts`);
-    log.info(`Control API  ${server.url}\nPLC          ${server.plcUrl}`);
+    log.info(
+      `Control API  ${server.url}\nPLC          ${server.plcUrl}\nJetstream    ${server.jetstreamUrl}`
+    );
 
     for (const account of accounts) {
       log.step(`${account.handle}  ${account.endpoint}  ${account.did}`);
@@ -152,6 +181,7 @@ const start = async ({
       JSON.stringify({
         control: server.url,
         plc: server.plcUrl,
+        jetstream: server.jetstreamUrl,
         dir,
         accounts
       })
@@ -211,6 +241,22 @@ if (!result.ok) {
           file === "-"
             ? await text(process.stdin)
             : await readFile(file, "utf8")
+      });
+      break;
+    }
+    case "/jetstream": {
+      await call(result.model.url, "/jetstream");
+      break;
+    }
+    case "/jetstream/pause":
+    case "/jetstream/resume": {
+      await call(result.model.url, result.route, { method: "POST" });
+      break;
+    }
+    case "/jetstream/ignore":
+    case "/jetstream/heed": {
+      await call(result.model.url, `${result.route}/${result.model.name}`, {
+        method: "POST"
       });
       break;
     }
