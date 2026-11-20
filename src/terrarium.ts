@@ -8,6 +8,7 @@ import {
   dohAnswer,
   dohHandle,
   isSandboxHost,
+  isWellKnownDid,
   JETSTREAM_HOSTS,
   JETSTREAM_URL,
   PDS_DOMAIN,
@@ -45,6 +46,17 @@ const nameSchema = v.pipe(
     /^[a-z][a-z0-9-]{0,29}$/u,
     "An account name is lowercase letters, digits and dashes, starting with a letter."
   )
+);
+
+/** An atproto handle: a domain name, as the spec allows it. Lowercased, since handles compare without case. */
+const handleSchema = v.pipe(
+  v.string(),
+  v.maxLength(253),
+  v.regex(
+    /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/iu,
+    "A handle is a domain name, such as alice.test or example.com."
+  ),
+  v.toLowerCase()
 );
 
 const storedAccountSchema = v.object({
@@ -101,6 +113,9 @@ export interface TerrariumOptions {
 export interface NewAccount {
   /** Short name for the account: `alice` makes `alice.test`, on `https://alice.terrarium.test`. */
   readonly name: string;
+  /**
+   * Its handle, `<name>.test` by default. A real domain works too, such as `example.com` for an app that looks its main account up by handle: inside the sandbox, that handle's `/.well-known/atproto-did` and its DNS-over-HTTPS lookup are answered with the account's DID, as Mock Service Worker answers for a real domain, and nothing else at that domain is touched.
+   */
   readonly handle?: string | undefined;
   readonly password?: string | undefined;
 }
@@ -300,7 +315,7 @@ export const createTerrarium = async ({
   };
 
   const byHandle = (handle: string): StoredAccount | undefined =>
-    stored.find((account) => account.handle === handle);
+    stored.find((account) => account.handle === handle.toLowerCase());
 
   const isJetstream = (url: URL): boolean =>
     JETSTREAM_HOSTS.has(url.hostname) ||
@@ -315,7 +330,9 @@ export const createTerrarium = async ({
       isJetstream(url) ||
       APPVIEW_HOSTS.has(url.hostname) ||
       isSandboxHost(url.hostname) ||
-      (doh !== undefined && byHandle(doh) !== undefined)
+      (doh !== undefined && byHandle(doh) !== undefined) ||
+      // An account at a real domain owns that domain's handle lookup, and only that.
+      (isWellKnownDid(url) && byHandle(url.hostname) !== undefined)
     );
   };
 
@@ -382,7 +399,7 @@ export const createTerrarium = async ({
 
     const handled = byHandle(url.hostname);
 
-    if (handled && url.pathname === "/.well-known/atproto-did") {
+    if (handled && isWellKnownDid(url)) {
       return new Response(handled.did, {
         headers: { "content-type": "text/plain" }
       });
@@ -501,6 +518,15 @@ export const createTerrarium = async ({
         throw new Error(`There's already an account called ${name}.`);
       }
 
+      const accountHandle = v.parse(handleSchema, handle ?? `${name}.test`);
+      const holder = byHandle(accountHandle);
+
+      if (holder) {
+        throw new Error(
+          `${holder.name} already has the handle ${accountHandle}.`
+        );
+      }
+
       const port =
         Math.max(ports.pds - 1, ...stored.map((account) => account.port)) + 1;
       const endpoint = `https://${name}.${PDS_DOMAIN}`;
@@ -510,7 +536,7 @@ export const createTerrarium = async ({
         {
           type: "plc_operation",
           prev: null,
-          alsoKnownAs: [`at://${handle ?? `${name}.test`}`],
+          alsoKnownAs: [`at://${accountHandle}`],
           rotationKeys: [
             await (await keyFrom(rotationKey)).exportPublicKey("did")
           ],
@@ -541,7 +567,7 @@ export const createTerrarium = async ({
       const account: StoredAccount = {
         name,
         did,
-        handle: handle ?? `${name}.test`,
+        handle: accountHandle,
         endpoint,
         port,
         password,

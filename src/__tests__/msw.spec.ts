@@ -92,6 +92,22 @@ describe("terrarium behind Mock Service Worker", () => {
     ).resolves.toBe(alice.did);
   });
 
+  it("resolves an account at a real domain the same way, with atcute's own resolvers", async () => {
+    const site = await terrarium.createAccount({
+      name: "site",
+      handle: "example.com"
+    });
+
+    await expect(
+      new DohJsonHandleResolver({
+        dohUrl: "https://cloudflare-dns.com/dns-query"
+      }).resolve("example.com")
+    ).resolves.toBe(site.did);
+    await expect(
+      new WellKnownHandleResolver().resolve("example.com")
+    ).resolves.toBe(site.did);
+  }, 60_000);
+
   it("signs in with the password and writes as the account, at the PDS its DID document names", async () => {
     const session = (await (
       await fetch(

@@ -69,7 +69,9 @@ const app = command(
       argument(name("name"), schema(v.string())),
       option(
         name("handle"),
-        description("Its handle (default <name>.test)"),
+        description(
+          "Its handle (default <name>.test); a real domain works, and only its handle lookups are answered"
+        ),
         schema(v.optional(v.string()))
       ),
       option(

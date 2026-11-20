@@ -87,6 +87,9 @@ const jetstream = (
 /** The header carrying the address a forwarded request was really for. */
 export const PROXY_URL_HEADER = "x-terrarium-url";
 
+/** Set on the answer to a forwarded request the sandbox doesn't own, so the interceptor that forwarded it can send it where it was going instead. */
+export const PROXY_UNOWNED_HEADER = "x-terrarium-unowned";
+
 /**
  * A request another process intercepted (`@saeris/terrarium/register`), forwarded with the address it was for. Answered only for the sandbox's own addresses, so this is never a way out to the network.
  */
@@ -97,10 +100,14 @@ const proxy = async (
   const target = request.headers.get(PROXY_URL_HEADER);
 
   if (target === null || !terrarium.owns(target)) {
-    return problem(
+    const refused = problem(
       `Terrarium forwards only requests for its own addresses, and ${String(target)} isn't one.`,
       403
     );
+
+    refused.headers.set(PROXY_UNOWNED_HEADER, "1");
+
+    return refused;
   }
 
   const headers = new Headers(request.headers);

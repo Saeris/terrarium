@@ -1,9 +1,16 @@
+import { passthrough } from "msw";
 import { http } from "msw/http";
 import { setupServer } from "msw/node";
 import { ws } from "msw/ws";
 import * as v from "valibot";
-import { PROXY_URL_HEADER } from "./control";
-import { JETSTREAM_HOSTS, isLoopback, isSandboxAddress, refuse } from "./hosts";
+import { PROXY_UNOWNED_HEADER, PROXY_URL_HEADER } from "./control";
+import {
+  JETSTREAM_HOSTS,
+  isHandleLookup,
+  isLoopback,
+  isSandboxAddress,
+  refuse
+} from "./hosts";
 
 /**
  * Terrarium in another Node process, such as an app's dev server: preload this, and every request that process makes to the sandbox's addresses goes to a running sandbox (`terrarium start`), while everything else goes where it always did, or, with `TERRARIUM_UNOWNED=refuse`, fails unless it's to this machine.
@@ -61,6 +68,25 @@ const server = setupServer(
   http.all(
     ({ request }) => isSandboxAddress(new URL(request.url)),
     async ({ request }) => forward(request)
+  ),
+  // A handle lookup at a real domain is the sandbox's only if one of its accounts holds that handle, which only the sandbox knows: ask it, and send the lookup on where it was going when the answer is no.
+  http.all(
+    ({ request }) => {
+      const url = new URL(request.url);
+
+      return isHandleLookup(url) && outside(url);
+    },
+    async ({ request }) => {
+      const answer = await forward(request);
+
+      if (!answer.headers.has(PROXY_UNOWNED_HEADER)) {
+        return answer;
+      }
+
+      return unowned === "refuse"
+        ? new Response(refuse(request.url), { status: 502 })
+        : passthrough();
+    }
   ),
   ...(unowned === "refuse"
     ? [

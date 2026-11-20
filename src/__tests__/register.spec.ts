@@ -45,7 +45,9 @@ const socket = await new Promise((resolve) => {
   connection.addEventListener("open", () => resolve("open"));
   connection.addEventListener("error", () => resolve("error"));
 });
-console.log(JSON.stringify({ http, local, socket }));
+const held = await fetch("https://example.com/.well-known/atproto-did").then((response) => response.text());
+const unheld = await fetch("https://example.org/.well-known/atproto-did").then((response) => response.status);
+console.log(JSON.stringify({ http, local, socket, held, unheld }));
 `;
 
 const run = async (
@@ -77,6 +79,7 @@ const run = async (
 describe("terrarium in another process", () => {
   let server: Server;
   let alice: Account;
+  let site: Account;
   let dir: string;
 
   beforeAll(async () => {
@@ -92,6 +95,10 @@ describe("terrarium in another process", () => {
       ports: { plc: 25_820, jetstream: 25_840, pds: 26_000 }
     });
     alice = await server.terrarium.createAccount({ name: "alice" });
+    site = await server.terrarium.createAccount({
+      name: "site",
+      handle: "example.com"
+    });
     await server.terrarium.seed("alice", [
       { collection: NOTE, rkey: "hello", record: { text: "hello, process" } }
     ]);
@@ -149,16 +156,22 @@ describe("terrarium in another process", () => {
       TERRARIUM_UNOWNED: "refuse"
     });
 
+    // example.com is held by a sandbox account as its handle, so its handle lookup is answered even though the rest of the domain is refused; example.org's isn't anyone's.
     expect(JSON.parse(stdout)).toEqual({
       http: 502,
       local: 200,
-      socket: "error"
+      socket: "error",
+      held: site.did,
+      unheld: 502
     });
     expect(stderr).toContain(
       "Terrarium refused a request to https://example.com"
     );
     expect(stderr).toContain(
       "Terrarium refused a request to wss://example.com"
+    );
+    expect(stderr).toContain(
+      "Terrarium refused a request to https://example.org"
     );
   }, 60_000);
 });

@@ -24,6 +24,8 @@ Every account is a real `did:plc`, registered with a local PLC directory that en
 
 So an app keeps its real configuration: atcute's resolvers with their defaults, Bluesky's Jetstream URL, a PDS from a DID document. Any other `.test` host is Terrarium's too, and gets a 502, so nothing aimed at the sandbox can leak.
 
+**A handle can be a real domain.** An app that finds an account by a handle it knows, such as its own main account at `example.com`, finds the sandbox's account there instead: make one with `{ handle: "example.com" }` (or `terrarium accounts create site --handle example.com`), and that handle's `/.well-known/atproto-did` and DNS-over-HTTPS lookups are answered with the account's DID. Nothing else at the domain is touched. The DID is the sandbox's own, since nobody can mint a real account's DID, which is a reason for apps to find accounts by handle rather than by a hard-coded DID.
+
 ## 📦 Installation
 
 ```bash

@@ -47,6 +47,16 @@ export const isSandboxAddress = (url: URL): boolean => {
   );
 };
 
+/** A request for the DID a handle's own host vouches for: `https://<handle>/.well-known/atproto-did`. */
+export const isWellKnownDid = (url: URL): boolean =>
+  url.pathname === "/.well-known/atproto-did";
+
+/**
+ * Whether a request looks a handle up, at any domain: its well-known DID or its `_atproto` TXT record over DNS-over-HTTPS. An account can hold a real domain as its handle, so an interceptor in another process can't tell from the address alone whether the sandbox answers this one, and asks it.
+ */
+export const isHandleLookup = (url: URL): boolean =>
+  isWellKnownDid(url) || dohHandle(url) !== undefined;
+
 /** The `_atproto` handle a DNS-over-HTTPS query asks about, if that's what it is. */
 export const dohHandle = (url: URL): string | undefined => {
   if (

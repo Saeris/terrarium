@@ -109,6 +109,42 @@ describe("the sandbox", () => {
     );
   });
 
+  // An app that finds its main account by a real handle, such as a catalog at `example.com`, has to find the sandbox's account there instead, without being configured to: so the sandbox answers that handle's lookups, and claims nothing else at the domain.
+  it("takes a real domain as a handle, and answers only that handle's lookups", async () => {
+    const site = await terrarium.createAccount({
+      name: "site",
+      handle: "Example.com"
+    });
+
+    expect(site.handle).toBe("example.com");
+    expect(terrarium.owns("https://example.com/.well-known/atproto-did")).toBe(
+      true
+    );
+    expect(terrarium.owns("https://example.com/")).toBe(false);
+    expect(
+      terrarium.owns("https://www.example.com/.well-known/atproto-did")
+    ).toBe(false);
+    await expect(
+      (await get("https://example.com/.well-known/atproto-did")).text()
+    ).resolves.toBe(site.did);
+    await expect(
+      (
+        await get(
+          "https://cloudflare-dns.com/dns-query?name=_atproto.example.com&type=TXT"
+        )
+      ).json()
+    ).resolves.toMatchObject({ Answer: [{ data: `"did=${site.did}"` }] });
+  }, 60_000);
+
+  it("won't give two accounts one handle, or take something that isn't one", async () => {
+    await expect(
+      terrarium.createAccount({ name: "imposter", handle: "example.com" })
+    ).rejects.toThrow(/site already has the handle example\.com/u);
+    await expect(
+      terrarium.createAccount({ name: "nope", handle: "not a handle" })
+    ).rejects.toThrow(/domain name/u);
+  });
+
   it("comes back after a restart with the same identities and records", async () => {
     await terrarium.dispose();
     terrarium = await createTerrarium({ dir });
