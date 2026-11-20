@@ -163,6 +163,26 @@ describe("terrarium behind Mock Service Worker", () => {
     socket.close();
   });
 
+  it("suggests the sandbox's accounts as someone types, from Bluesky's AppView address", async () => {
+    await terrarium.seed("alice", [
+      {
+        collection: "app.bsky.actor.profile",
+        rkey: "self",
+        record: { displayName: "Alice Liddell" }
+      }
+    ]);
+
+    const found = (await (
+      await fetch(
+        "https://public.api.bsky.app/xrpc/app.bsky.actor.searchActorsTypeahead?q=ali&limit=6"
+      )
+    ).json()) as { actors: unknown[] };
+
+    expect(found.actors).toEqual([
+      { did: alice.did, handle: "alice.test", displayName: "Alice Liddell" }
+    ]);
+  });
+
   it("leaves everything else to the app's own handlers", async () => {
     await expect(
       (await fetch("https://catalog.example.com/beers/one")).json()
