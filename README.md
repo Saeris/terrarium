@@ -61,6 +61,16 @@ await page.goto("https://your.app/");
 
 Every request a page makes to Terrarium's addresses is answered by the sandbox, including top-level navigations, so an OAuth redirect lands on the account's PDS sign-in page. Jetstream is answered over WebSocket. No TLS or DNS is involved: Playwright hands the request over before it reaches the network.
 
+### In another Node process
+
+An app’s dev server, or any script, can use a running sandbox (`terrarium start`) without a line of it changing: preload the interceptor.
+
+```bash
+TERRARIUM_URL=http://127.0.0.1:2580 node --import @saeris/terrarium/register server.js
+```
+
+That process’s requests to the sandbox’s addresses are forwarded to the sandbox (Mock Service Worker intercepts them in that process), its Jetstream connections are piped to the sandbox’s Jetstream, and everything else goes where it always did. For a dev server started by a tool, pass it through `NODE_OPTIONS="--import @saeris/terrarium/register"`.
+
 ### On Cloudflare Workers, with Miniflare
 
 A Worker makes its requests from `workerd`, where nothing that patches Node reaches. Give Miniflare Terrarium as its outbound network, and mount the app inside the sandbox when PDSes need to reach it too, as an OAuth sign-in does:

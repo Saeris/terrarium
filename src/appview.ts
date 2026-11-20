@@ -2,12 +2,6 @@
  * The parts of Bluesky's AppView that apps lean on for accounts: finding one as someone types, showing its profile, resolving a handle. Answered from the sandbox's own accounts, so a sign-in field's suggestions list the accounts a test made, and nothing is asked of the real AppView. Anything else gets "not implemented" rather than a trip to the network.
  */
 
-/** Where apps reach the AppView. */
-export const APPVIEW_HOSTS: ReadonlySet<string> = new Set([
-  "public.api.bsky.app",
-  "api.bsky.app"
-]);
-
 export interface Profile {
   readonly displayName?: string | undefined;
   readonly description?: string | undefined;

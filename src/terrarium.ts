@@ -4,6 +4,7 @@ import { deriveDidFromGenesisOp, signOperation } from "@atcute/did-plc";
 import * as v from "valibot";
 import { startCirrus, type CirrusEngine } from "./engines/cirrus";
 import {
+  APPVIEW_HOSTS,
   dohAnswer,
   dohHandle,
   isSandboxHost,
@@ -12,7 +13,7 @@ import {
   PDS_DOMAIN,
   PLC_HOST
 } from "./hosts";
-import { appview, APPVIEW_HOSTS, type Profile } from "./appview";
+import { appview, type Profile } from "./appview";
 import { createJetstream, filterFrom, type Jetstream } from "./jetstream";
 import { keyFrom, newKey } from "./keys";
 import { createPlc } from "./plc";

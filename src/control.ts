@@ -84,6 +84,45 @@ const jetstream = (
   return problem(`Jetstream has no ${String(action)}.`, 404);
 };
 
+/** The header carrying the address a forwarded request was really for. */
+export const PROXY_URL_HEADER = "x-terrarium-url";
+
+/**
+ * A request another process intercepted (`@saeris/terrarium/register`), forwarded with the address it was for. Answered only for the sandbox's own addresses, so this is never a way out to the network.
+ */
+const proxy = async (
+  terrarium: Terrarium,
+  request: Request
+): Promise<Response> => {
+  const target = request.headers.get(PROXY_URL_HEADER);
+
+  if (target === null || !terrarium.owns(target)) {
+    return problem(
+      `Terrarium forwards only requests for its own addresses, and ${String(target)} isn't one.`,
+      403
+    );
+  }
+
+  const headers = new Headers(request.headers);
+
+  headers.delete(PROXY_URL_HEADER);
+  headers.delete("host");
+
+  const body =
+    request.method === "GET" || request.method === "HEAD"
+      ? undefined
+      : await request.arrayBuffer();
+
+  return terrarium.fetch(
+    new Request(target, {
+      method: request.method,
+      headers,
+      redirect: "manual",
+      ...(body !== undefined && { body })
+    })
+  );
+};
+
 export const control =
   (terrarium: Terrarium) =>
   async (request: Request): Promise<Response> => {
@@ -102,6 +141,10 @@ export const control =
 
       if (area === "jetstream") {
         return jetstream(terrarium, request.method, name, sub);
+      }
+
+      if (area === "_proxy") {
+        return await proxy(terrarium, request);
       }
 
       if (area !== "accounts") {

@@ -26,6 +26,27 @@ export const DOH_HOSTS: ReadonlySet<string> = new Set([
   "dns.google"
 ]);
 
+/** Bluesky's AppView, for the parts of it apps use to find and show accounts. */
+export const APPVIEW_HOSTS: ReadonlySet<string> = new Set([
+  "public.api.bsky.app",
+  "api.bsky.app"
+]);
+
+/**
+ * Whether an address is the sandbox's, without asking a running sandbox: what an interceptor in another process decides by. A DNS-over-HTTPS lookup counts when the handle it asks about is at a sandbox host.
+ */
+export const isSandboxAddress = (url: URL): boolean => {
+  const handle = dohHandle(url);
+
+  return (
+    url.hostname === PLC_HOST ||
+    JETSTREAM_HOSTS.has(url.hostname) ||
+    APPVIEW_HOSTS.has(url.hostname) ||
+    isSandboxHost(url.hostname) ||
+    (handle !== undefined && isSandboxHost(handle))
+  );
+};
+
 /** The `_atproto` handle a DNS-over-HTTPS query asks about, if that's what it is. */
 export const dohHandle = (url: URL): string | undefined => {
   if (

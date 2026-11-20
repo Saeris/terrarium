@@ -46,6 +46,10 @@
     "./wrangler": {
       "types": "./dist/wrangler.d.mts",
       "default": "./dist/wrangler.mjs"
+    },
+    "./register": {
+      "types": "./dist/register.d.mts",
+      "default": "./dist/register.mjs"
     }
   },
   "publishConfig": {

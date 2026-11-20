@@ -20,7 +20,8 @@ export default defineConfig({
       "src/msw.ts",
       "src/playwright.ts",
       "src/miniflare.ts",
-      "src/wrangler.ts"
+      "src/wrangler.ts",
+      "src/register.ts"
     ],
     clean: true,
     format: [`esm`],

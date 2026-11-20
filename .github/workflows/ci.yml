@@ -28,5 +28,6 @@ jobs:
       - run: yarn build:engines
 
       - run: vp check
-      - run: vp test
+      # The preload is tested as a built file, in a child process.
       - run: vp pack
+      - run: vp test
