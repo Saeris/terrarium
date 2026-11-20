@@ -1,0 +1,10 @@
+// A Workers app that knows nothing about Terrarium, for startWranglerApp's tests.
+{
+  "name": "terrarium-fixture-app",
+  "main": "index.js",
+  "compatibility_date": "2026-09-19",
+  "vars": {
+    "GREETING": "from wrangler.jsonc",
+    "ORIGIN": "https://app.example.com"
+  }
+}

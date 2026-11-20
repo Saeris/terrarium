@@ -42,6 +42,10 @@
     "./miniflare": {
       "types": "./dist/miniflare.d.mts",
       "default": "./dist/miniflare.mjs"
+    },
+    "./wrangler": {
+      "types": "./dist/wrangler.d.mts",
+      "default": "./dist/wrangler.mjs"
     }
   },
   "publishConfig": {
@@ -110,13 +114,17 @@
   "bin": "./dist/cli.mjs",
   "peerDependencies": {
     "msw": "^3.0.0",
-    "playwright-core": "^1.48.0"
+    "playwright-core": "^1.48.0",
+    "wrangler": "^4.130.0"
   },
   "peerDependenciesMeta": {
     "msw": {
       "optional": true
     },
     "playwright-core": {
+      "optional": true
+    },
+    "wrangler": {
       "optional": true
     }
   }
