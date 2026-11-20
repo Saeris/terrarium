@@ -3,10 +3,10 @@ import { setupServer } from "msw/node";
 import { ws } from "msw/ws";
 import * as v from "valibot";
 import { PROXY_URL_HEADER } from "./control";
-import { JETSTREAM_HOSTS, isSandboxAddress } from "./hosts";
+import { JETSTREAM_HOSTS, isLoopback, isSandboxAddress, refuse } from "./hosts";
 
 /**
- * Terrarium in another Node process, such as an app's dev server: preload this, and every request that process makes to the sandbox's addresses goes to a running sandbox (`terrarium start`), while everything else goes where it always did.
+ * Terrarium in another Node process, such as an app's dev server: preload this, and every request that process makes to the sandbox's addresses goes to a running sandbox (`terrarium start`), while everything else goes where it always did, or, with `TERRARIUM_UNOWNED=refuse`, fails unless it's to this machine.
  *
  *     TERRARIUM_URL=http://127.0.0.1:2580 node --import @saeris/terrarium/register server.js
  *
@@ -14,6 +14,18 @@ import { JETSTREAM_HOSTS, isSandboxAddress } from "./hosts";
  */
 
 const control = process.env["TERRARIUM_URL"] ?? "http://127.0.0.1:2580";
+const unowned = v.parse(
+  v.optional(v.picklist(["network", "refuse"]), "network"),
+  process.env["TERRARIUM_UNOWNED"]
+);
+
+const outside = (url: URL): boolean =>
+  !isSandboxAddress(url) && !isLoopback(url.hostname);
+
+/** The part of an unhandled WebSocket frame that says where it was going. */
+const socketFrameSchema = v.object({
+  connection: v.object({ client: v.object({ url: v.instance(URL) }) })
+});
 
 const healthy = await fetch(`${control}/health`).catch((error: unknown) => {
   throw new Error(
@@ -50,6 +62,14 @@ const server = setupServer(
     ({ request }) => isSandboxAddress(new URL(request.url)),
     async ({ request }) => forward(request)
   ),
+  ...(unowned === "refuse"
+    ? [
+        http.all(
+          ({ request }) => outside(new URL(request.url)),
+          ({ request }) => new Response(refuse(request.url), { status: 502 })
+        )
+      ]
+    : []),
   ...[...JETSTREAM_HOSTS].map((host) =>
     ws
       .link(`wss://${host}/subscribe`)
@@ -71,4 +91,17 @@ const server = setupServer(
   )
 );
 
-server.listen({ onUnhandledFrame: "bypass" });
+server.listen({
+  // Anything left over is let through, except, when refusing, a WebSocket leaving the machine: throwing here fails it.
+  onUnhandledFrame: ({ frame }) => {
+    if (unowned !== "refuse" || frame.protocol !== "ws") {
+      return;
+    }
+
+    const { url } = v.parse(socketFrameSchema, frame.data).connection.client;
+
+    if (outside(url)) {
+      throw new Error(refuse(url));
+    }
+  }
+});

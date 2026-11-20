@@ -1,3 +1,5 @@
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { chromium, type Browser, type BrowserContext } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import { route } from "../playwright";
@@ -147,5 +149,41 @@ describe("terrarium inside a Playwright browser", () => {
     ]);
 
     await expect(arrived).resolves.toBe("seen by the page");
+  });
+
+  it("keeps the page off the internet when asked, but not off this machine, where the app under test runs", async () => {
+    const local = createServer((_, response) => {
+      response.end("local");
+    });
+
+    await new Promise<void>((resolve) => {
+      local.listen(0, "127.0.0.1", resolve);
+    });
+
+    const { port } = local.address() as AddressInfo;
+    const strict = await browser.newContext();
+
+    await route(strict, terrarium, { unowned: "refuse" });
+
+    const page = await strict.newPage();
+
+    expect((await page.goto("https://example.com/"))?.status()).toBe(502);
+    expect((await page.goto(`http://127.0.0.1:${port}/`))?.status()).toBe(200);
+    await expect(
+      page.evaluate(
+        async () =>
+          new Promise<number>((resolve) => {
+            new WebSocket("wss://example.com/").addEventListener(
+              "close",
+              (event) => {
+                resolve(event.code);
+              }
+            );
+          })
+      )
+    ).resolves.toBe(1008);
+
+    await strict.close();
+    local.close();
   });
 });

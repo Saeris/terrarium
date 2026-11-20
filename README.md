@@ -102,6 +102,20 @@ const app = await startWranglerApp(terrarium, {
 await page.goto(app.url); // with route(context, terrarium)
 ```
 
+### Keeping everything off the network
+
+By default, as with Mock Service Worker, what Terrarium doesn't own goes where it always did. To prove a test never leaves the sandbox, have every interceptor refuse the rest. A refused request gets a 502, a refused WebSocket fails, and each refusal is printed on stderr with where it was going, because the app under test may swallow the failure. Requests to this machine (`localhost`, `127.0.0.1`), where the app under test and the sandbox's control API run, still go through.
+
+| Where                | How                                                              |
+| -------------------- | ---------------------------------------------------------------- |
+| Mock Service Worker  | `server.listen({ onUnhandledFrame: "error" })`                   |
+| Playwright           | `route(context, terrarium, { unowned: "refuse" })`               |
+| Another Node process | `TERRARIUM_UNOWNED=refuse` beside `TERRARIUM_URL`                |
+| Miniflare            | `outbound(terrarium, { unowned: "refuse" })`                     |
+| Wrangler             | `startWranglerApp(terrarium, { ...options, unowned: "refuse" })` |
+
+Your app's own services are yours to answer, as with Mock Service Worker: a Playwright route or a handler of your own, registered after Terrarium's.
+
 ### From the command line
 
 Start a sandbox, and leave it running:

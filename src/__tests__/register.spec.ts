@@ -36,6 +36,44 @@ socket.addEventListener("message", (event) => {
 });
 `;
 
+/** An app reaching for the internet, and for this machine, to see which get through. */
+const ELSEWHERE = `
+const http = await fetch("https://example.com/").then((response) => response.status);
+const local = await fetch(process.env.TERRARIUM_URL + "/health").then((response) => response.status);
+const socket = await new Promise((resolve) => {
+  const connection = new WebSocket("wss://example.com/");
+  connection.addEventListener("open", () => resolve("open"));
+  connection.addEventListener("error", () => resolve("error"));
+});
+console.log(JSON.stringify({ http, local, socket }));
+`;
+
+const run = async (
+  script: string,
+  args: string[],
+  env: Record<string, string>
+): Promise<{ stdout: string; stderr: string }> =>
+  new Promise((resolve, reject) => {
+    const child = spawn(
+      process.execPath,
+      ["--import", pathToFileURL(REGISTER).href, script, ...args],
+      { env: { ...process.env, ...env } }
+    );
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", reject);
+    child.on("close", () => {
+      resolve({ stdout, stderr });
+    });
+  });
+
 describe("terrarium in another process", () => {
   let server: Server;
   let alice: Account;
@@ -58,6 +96,7 @@ describe("terrarium in another process", () => {
       { collection: NOTE, rkey: "hello", record: { text: "hello, process" } }
     ]);
     await writeFile(join(dir, "app.mjs"), APP);
+    await writeFile(join(dir, "elsewhere.mjs"), ELSEWHERE);
   }, 60_000);
 
   afterAll(async () => {
@@ -102,5 +141,24 @@ describe("terrarium in another process", () => {
       { listening: true },
       { heard: "heard by the app" }
     ]);
+  }, 60_000);
+
+  it("keeps the process off the internet when asked, saying what it refused, but not off this machine", async () => {
+    const { stdout, stderr } = await run(join(dir, "elsewhere.mjs"), [], {
+      TERRARIUM_URL: server.url,
+      TERRARIUM_UNOWNED: "refuse"
+    });
+
+    expect(JSON.parse(stdout)).toEqual({
+      http: 502,
+      local: 200,
+      socket: "error"
+    });
+    expect(stderr).toContain(
+      "Terrarium refused a request to https://example.com"
+    );
+    expect(stderr).toContain(
+      "Terrarium refused a request to wss://example.com"
+    );
   }, 60_000);
 });

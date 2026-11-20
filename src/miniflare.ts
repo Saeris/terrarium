@@ -9,6 +9,7 @@ import {
   responseToWorker,
   toWorker
 } from "./bridge";
+import { refuse, type Unowned } from "./hosts";
 import type { Terrarium } from "./terrarium";
 
 /**
@@ -21,7 +22,7 @@ import type { Terrarium } from "./terrarium";
 
 export interface OutboundOptions {
   /** What to do with a request for an address Terrarium doesn't own: send it to the network (the default), or refuse it with a 502. */
-  readonly unowned?: "network" | "refuse";
+  readonly unowned?: Unowned;
 }
 
 export const outbound =
@@ -35,10 +36,7 @@ export const outbound =
 
     return responseToWorker(
       unowned === "refuse"
-        ? new Response(
-            `Terrarium refused a request to ${new URL(standard.url).origin}, which it doesn't own.`,
-            { status: 502 }
-          )
+        ? new Response(refuse(standard.url), { status: 502 })
         : await fetch(standard)
     );
   };

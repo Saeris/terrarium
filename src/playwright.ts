@@ -1,5 +1,5 @@
 import type { BrowserContext, Page, Route } from "playwright-core";
-import { JETSTREAM_HOSTS } from "./hosts";
+import { JETSTREAM_HOSTS, isLoopback, refuse, type Unowned } from "./hosts";
 import { filterFrom } from "./jetstream";
 import type { Terrarium } from "./terrarium";
 
@@ -91,9 +91,15 @@ const follow = async (
   return response;
 };
 
+export interface RouteOptions {
+  /** What to do with a request the page makes to an address Terrarium doesn't own, other than this machine's: let it through (the default), or refuse it, a 502 for a request and a closed socket for a WebSocket. */
+  readonly unowned?: Unowned;
+}
+
 export const route = async (
   target: BrowserContext | Page,
-  terrarium: Terrarium
+  terrarium: Terrarium,
+  { unowned = "network" }: RouteOptions = {}
 ): Promise<void> => {
   const answer = async (intercepted: Route): Promise<void> => {
     const request = intercepted.request();
@@ -149,4 +155,20 @@ export const route = async (
       socket.onClose(stop);
     }
   );
+
+  if (unowned === "refuse") {
+    const outside = (url: URL): boolean =>
+      !terrarium.owns(url) && !isLoopback(url.hostname);
+
+    await target.route(outside, async (intercepted) => {
+      await intercepted.fulfill({
+        status: 502,
+        body: refuse(intercepted.request().url())
+      });
+    });
+    await target.routeWebSocket(outside, async (socket) => {
+      refuse(socket.url());
+      await socket.close({ code: 1008, reason: "Refused by Terrarium" });
+    });
+  }
 };

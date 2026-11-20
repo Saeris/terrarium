@@ -88,6 +88,25 @@ export const dohAnswer = (
   );
 };
 
+/** Addresses on this machine. The app under test and the sandbox's control API live here, so an interceptor refusing what Terrarium doesn't own lets these through. */
+export const isLoopback = (hostname: string): boolean =>
+  hostname === "localhost" ||
+  hostname.endsWith(".localhost") ||
+  hostname.startsWith("127.") ||
+  hostname === "[::1]";
+
+/** What an interceptor does with a request for an address Terrarium doesn't own: let it reach the network, as Mock Service Worker does by default, or refuse it, which proves what's under test never leaves the sandbox. */
+export type Unowned = "network" | "refuse";
+
+/** Say on stderr that a request was refused, since the app under test may swallow the failure, and return what was said. */
+export const refuse = (url: string | URL): string => {
+  const message = `Terrarium refused a request to ${new URL(url).origin}, which it doesn't own.`;
+
+  console.error(message);
+
+  return message;
+};
+
 /**
  * Hosts under the reserved `.test` and `.internal` TLDs are always Terrarium's: they can't exist on the public internet, so nothing aimed at the sandbox can leak. Apps mount under either; `.internal` is the one OAuth clients accept for themselves, since atproto's OAuth libraries treat `.test` as a local hostname.
  */
