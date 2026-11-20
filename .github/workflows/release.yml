@@ -77,6 +77,9 @@ jobs:
           cache: true
           registry-url: "https://registry.npmjs.org"
 
+      # The package ships the Cirrus engine's bundle, which nothing else builds.
+      - run: yarn build:engines
+
       - run: vp pack
 
       - run: vp dlx @varlock/bumpy ci release --expect-mode publish

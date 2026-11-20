@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🪴 Terrarium
+# 🏞️ Terrarium
 
 [![npm version][npm_badge]][npm]
 [![CI status][ci_badge]][ci]
