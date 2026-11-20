@@ -29,7 +29,9 @@ Start a sandbox, and leave it running:
 terrarium start                       # keeps its state in ./.terrarium
 ```
 
-Then, from another shell, make accounts as you need them and fill them with records. Every command prints JSON.
+At a terminal it prints a summary. Run from a script or by an agent, it prints one line of JSON once it's ready, with the control API's and the PLC directory's URLs and every account.
+
+Then, from another shell, make accounts as you need them and fill them with records. Every command prints JSON, and `terrarium --help` (or `--help` after any command) says what it takes.
 
 ```bash
 terrarium accounts create alice       # alice.test, password "password"

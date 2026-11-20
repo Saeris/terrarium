@@ -1,84 +1,162 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
 import { text } from "node:stream/consumers";
-import { parseArgs } from "node:util";
+import {
+  argument,
+  command,
+  description,
+  env,
+  name,
+  option,
+  parse,
+  printErrors,
+  printHelp,
+  printVersion,
+  schema,
+  version
+} from "@bomb.sh/router";
+import { intro, log, outro, spinner } from "@clack/prompts";
+import * as v from "valibot";
+import manifest from "../package.json" with { type: "json" };
 import { DEFAULT_CONTROL_PORT, startServer } from "./server";
+import { DEFAULT_HOST } from "./terrarium";
 
 /**
  * `terrarium`: start a sandbox, then make accounts and seed them from another shell. Every command but `start` talks to the running sandbox's control API and prints JSON, for scripts and agents to read.
  */
 
-const USAGE = `Usage:
-  terrarium start [--dir .terrarium] [--host 127.0.0.1] [--port ${String(DEFAULT_CONTROL_PORT)}]
-  terrarium accounts                                   List accounts
-  terrarium accounts create <name> [--handle <handle>] [--password <password>]
-  terrarium seed <name> <file.json | ->                Write records to an account's repo
-  terrarium health
+const DEFAULT_URL = `http://${DEFAULT_HOST}:${String(DEFAULT_CONTROL_PORT)}`;
 
-Commands other than start reach the sandbox at --url, or TERRARIUM_URL, or http://127.0.0.1:${String(DEFAULT_CONTROL_PORT)}.
-Seed files hold [{ "collection", "rkey"?, "record" }], or { "records": [...] }.`;
+const url = option(
+  name("url"),
+  description(`Where the sandbox's control API is (default ${DEFAULT_URL})`),
+  schema(v.optional(v.string(), DEFAULT_URL)),
+  env("TERRARIUM_URL")
+);
 
-const { values, positionals } = parseArgs({
-  allowPositionals: true,
-  options: {
-    dir: { type: "string", default: ".terrarium" },
-    host: { type: "string", default: "127.0.0.1" },
-    port: { type: "string", default: String(DEFAULT_CONTROL_PORT) },
-    url: { type: "string" },
-    handle: { type: "string" },
-    password: { type: "string" },
-    help: { type: "boolean", short: "h" }
-  }
-});
+const app = command(
+  name("terrarium"),
+  description(
+    "An Atmosphere in a box: a PLC directory and a PDS per account, on this machine."
+  ),
+  version(manifest.version),
+  command(
+    name("start"),
+    description("Start a sandbox and keep it running"),
+    option(
+      name("dir"),
+      description("Where to keep accounts and data"),
+      schema(v.optional(v.string(), ".terrarium"))
+    ),
+    option(
+      name("host"),
+      description("The host every service is addressed by"),
+      schema(v.optional(v.string(), DEFAULT_HOST))
+    ),
+    option(
+      name("port"),
+      description("The control API's port"),
+      schema(v.optional(v.number(), DEFAULT_CONTROL_PORT))
+    )
+  ),
+  command(
+    name("accounts"),
+    description("List accounts: DIDs, handles, PDS URLs and passwords"),
+    url,
+    command(
+      name("create"),
+      description("Make an account, on its own PDS"),
+      argument(name("name"), schema(v.string())),
+      option(
+        name("handle"),
+        description("Its handle (default <name>.test)"),
+        schema(v.optional(v.string()))
+      ),
+      option(
+        name("password"),
+        description('Its password (default "password")'),
+        schema(v.optional(v.string()))
+      ),
+      url
+    )
+  ),
+  command(
+    name("seed"),
+    description(
+      'Write records to an account\'s repo, from a JSON file or "-" for stdin: [{ collection, rkey?, record }]'
+    ),
+    argument(name("name"), schema(v.string())),
+    argument(name("file"), schema(v.string())),
+    url
+  ),
+  command(name("health"), description("Check the sandbox is up"), url)
+);
 
-const controlUrl =
-  values.url ??
-  process.env["TERRARIUM_URL"] ??
-  `http://127.0.0.1:${String(DEFAULT_CONTROL_PORT)}`;
-
-const call = async (path: string, init?: RequestInit): Promise<void> => {
-  const response = await fetch(`${controlUrl}${path}`, {
+const call = async (
+  base: string,
+  path: string,
+  init?: RequestInit
+): Promise<void> => {
+  const response = await fetch(`${base}${path}`, {
     ...init,
     headers: { "content-type": "application/json" }
   }).catch((error: unknown) => {
     throw new Error(
-      `No sandbox at ${controlUrl} (${String(error)}). Start one with \`terrarium start\`.`,
+      `No sandbox at ${base} (${String(error)}). Start one with \`terrarium start\`.`,
       { cause: error }
     );
   });
-  const text = await response.text();
+  const body = await response.text();
 
   if (response.ok) {
-    console.log(text);
+    console.log(body);
   } else {
-    console.error(text);
+    console.error(body);
     process.exitCode = 1;
   }
 };
 
-const [command, ...rest] = positionals;
+const start = async ({
+  dir,
+  host,
+  port
+}: {
+  dir: string;
+  host: string;
+  port: number;
+}): Promise<void> => {
+  // A person at a terminal gets a summary; a script or an agent gets one line of JSON to read.
+  const human = process.stdout.isTTY;
+  const progress = human ? spinner() : undefined;
 
-if (values.help || command === undefined) {
-  console.log(USAGE);
-} else if (command === "start") {
-  const server = await startServer({
-    dir: values.dir,
-    host: values.host,
-    port: Number(values.port)
-  });
+  if (human) {
+    intro("terrarium");
+  }
 
-  console.log(
-    JSON.stringify(
-      {
+  progress?.start(`Starting the sandbox in ${dir}`);
+
+  const server = await startServer({ dir, host, port });
+  const accounts = server.terrarium.accounts();
+
+  if (human) {
+    progress?.stop(`Sandbox running, ${String(accounts.length)} accounts`);
+    log.info(`Control API  ${server.url}\nPLC          ${server.plcUrl}`);
+
+    for (const account of accounts) {
+      log.step(`${account.handle}  ${account.endpoint}  ${account.did}`);
+    }
+
+    outro("Ctrl+C to stop");
+  } else {
+    console.log(
+      JSON.stringify({
         control: server.url,
         plc: server.plcUrl,
-        dir: values.dir,
-        accounts: server.terrarium.accounts()
-      },
-      null,
-      2
-    )
-  );
+        dir,
+        accounts
+      })
+    );
+  }
 
   const stop = async (): Promise<void> => {
     await server.close();
@@ -87,28 +165,58 @@ if (values.help || command === undefined) {
 
   process.once("SIGINT", () => void stop());
   process.once("SIGTERM", () => void stop());
-} else if (command === "accounts" && rest[0] === "create" && rest[1]) {
-  await call("/accounts", {
-    method: "POST",
-    body: JSON.stringify({
-      name: rest[1],
-      ...(values.handle !== undefined && { handle: values.handle }),
-      ...(values.password !== undefined && { password: values.password })
-    })
-  });
-} else if (command === "accounts" && rest.length === 0) {
-  await call("/accounts");
-} else if (command === "seed" && rest[0] && rest[1]) {
-  await call(`/accounts/${rest[0]}/records`, {
-    method: "POST",
-    body:
-      rest[1] === "-"
-        ? await text(process.stdin)
-        : await readFile(rest[1], "utf8")
-  });
-} else if (command === "health") {
-  await call("/health");
-} else {
-  console.error(USAGE);
+};
+
+const result = parse(app, {
+  argv: process.argv.slice(2),
+  envs: [{ name: "process", value: process.env }]
+});
+
+if (!result.ok) {
+  console.error(printErrors(result));
   process.exitCode = 1;
+} else if (result.method === "help") {
+  console.log(printHelp(result));
+} else if (result.method === "version") {
+  console.log(printVersion(result));
+} else {
+  switch (result.route) {
+    case "/": {
+      console.log(printHelp({ ...result, method: "help" }));
+      break;
+    }
+    case "/start": {
+      await start(result.model);
+      break;
+    }
+    case "/accounts": {
+      await call(result.model.url, "/accounts");
+      break;
+    }
+    case "/accounts/create": {
+      const { url: base, ...account } = result.model;
+
+      await call(base, "/accounts", {
+        method: "POST",
+        body: JSON.stringify(account)
+      });
+      break;
+    }
+    case "/seed": {
+      const { url: base, name: account, file } = result.model;
+
+      await call(base, `/accounts/${account}/records`, {
+        method: "POST",
+        body:
+          file === "-"
+            ? await text(process.stdin)
+            : await readFile(file, "utf8")
+      });
+      break;
+    }
+    case "/health": {
+      await call(result.model.url, "/health");
+      break;
+    }
+  }
 }
