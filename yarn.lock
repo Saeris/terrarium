@@ -2405,10 +2405,13 @@ __metadata:
   peerDependencies:
     msw: ^3.0.0
     playwright-core: ^1.48.0
+    wrangler: ^4.130.0
   peerDependenciesMeta:
     msw:
       optional: true
     playwright-core:
+      optional: true
+    wrangler:
       optional: true
   bin:
     terrarium: ./dist/cli.mjs
