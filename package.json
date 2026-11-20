@@ -38,7 +38,11 @@
       "types": "./dist/playwright.d.mts",
       "default": "./dist/playwright.mjs"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./miniflare": {
+      "types": "./dist/miniflare.d.mts",
+      "default": "./dist/miniflare.mjs"
+    }
   },
   "publishConfig": {
     "access": "public",

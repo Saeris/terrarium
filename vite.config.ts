@@ -14,7 +14,13 @@ export default defineConfig({
   },
   // ── Builds (tsdown) ─────────────────────────────────────────────────
   pack: {
-    entry: ["src/index.ts", "src/cli.ts", "src/msw.ts", "src/playwright.ts"],
+    entry: [
+      "src/index.ts",
+      "src/cli.ts",
+      "src/msw.ts",
+      "src/playwright.ts",
+      "src/miniflare.ts"
+    ],
     clean: true,
     format: [`esm`],
     dts: true,

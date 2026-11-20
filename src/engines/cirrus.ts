@@ -5,10 +5,15 @@ import { fileURLToPath } from "node:url";
 import { hash } from "bcryptjs";
 import {
   Miniflare,
-  Request as WorkerRequest,
-  Response as WorkerResponse,
+  type Response as WorkerResponse,
   type WebSocket as WorkerWebSocket
 } from "miniflare";
+import {
+  fromWorker,
+  responseFromWorker,
+  responseToWorker,
+  toWorker
+} from "../bridge";
 import { keyFrom } from "../keys";
 
 /** Cirrus bundled into one module by `yarn build:engines`, with its Durable Objects. Found from the source (`src/engines/`) and from the built package (`dist/`) alike. */
@@ -101,24 +106,8 @@ export const startCirrus = async ({
     },
     ...(persist !== undefined && { defaultPersistRoot: persist }),
     ...(listen && { host: listen.host, port: listen.port }),
-    outboundService: async (request): Promise<WorkerResponse> => {
-      const response = await outbound(
-        new Request(request.url, {
-          method: request.method,
-          headers: [...request.headers],
-          ...(request.body && {
-            body: await request.arrayBuffer(),
-            duplex: "half"
-          })
-        })
-      );
-
-      return new WorkerResponse(await response.arrayBuffer(), {
-        status: response.status,
-        statusText: response.statusText,
-        headers: [...response.headers]
-      });
-    }
+    outboundService: async (request): Promise<WorkerResponse> =>
+      responseToWorker(await outbound(await fromWorker(request)))
   });
 
   const { origin: runtime } = await miniflare.ready;
@@ -127,19 +116,9 @@ export const startCirrus = async ({
     authToken,
     runtime,
     async fetch(request) {
-      const response = await miniflare.dispatchFetch(
-        new WorkerRequest(request.url, {
-          method: request.method,
-          headers: [...request.headers],
-          ...(request.body && { body: await request.arrayBuffer() })
-        })
+      return responseFromWorker(
+        await miniflare.dispatchFetch(await toWorker(request))
       );
-
-      return new Response(await response.arrayBuffer(), {
-        status: response.status,
-        statusText: response.statusText,
-        headers: [...response.headers]
-      });
     },
     async upgrade(url) {
       const response = await miniflare.dispatchFetch(url, {

@@ -128,6 +128,15 @@ export interface Terrarium {
   owns(url: string | URL): boolean;
   /** Whether a request is Terrarium's own traffic, to the `workerd` processes behind its PDSes, which an interceptor in the same process must let through untouched. */
   internal(url: string | URL): boolean;
+  /**
+   * Put an app inside the sandbox at a `.test` host, so everything else there can reach it: a PDS fetching its OAuth client metadata or a page following a redirect back to it. Returns how to take it away again.
+   *
+   *     terrarium.mount("app.example.test", (request) => miniflare.dispatchFetch(request));
+   */
+  mount(
+    host: string,
+    handler: (request: Request) => Promise<Response>
+  ): () => void;
   /** Any request to any service in the sandbox, routed by its host. Anything else is refused, never sent to the network. */
   fetch(request: Request): Promise<Response>;
   /** A WebSocket to Jetstream without a socket, for clients that take a `connect` function. */
@@ -228,6 +237,8 @@ export const createTerrarium = async ({
   const stored: StoredAccount[] = stateFile ? await readState(stateFile) : [];
   /** Each account's PDS, by the host its DID document names. */
   const engines = new Map<string, CirrusEngine>();
+  /** Apps put inside the sandbox, by host. */
+  const mounted = new Map<string, (request: Request) => Promise<Response>>();
   const jetstream = createJetstream();
   const local = listen
     ? {
@@ -325,6 +336,12 @@ export const createTerrarium = async ({
       return engine.fetch(request);
     }
 
+    const app = mounted.get(url.host);
+
+    if (app) {
+      return app(request);
+    }
+
     const handled = byHandle(url.hostname);
 
     if (handled && url.pathname === "/.well-known/atproto-did") {
@@ -416,6 +433,21 @@ export const createTerrarium = async ({
       [...engines.values()].some(
         (engine) => new URL(url).origin === engine.runtime
       ),
+    mount(appHost, handler) {
+      if (!isTestHost(appHost)) {
+        throw new Error(
+          `Apps mount at .test hosts, which can't exist outside the sandbox: ${appHost} could.`
+        );
+      }
+
+      mounted.set(appHost, handler);
+
+      return () => {
+        if (mounted.get(appHost) === handler) {
+          mounted.delete(appHost);
+        }
+      };
+    },
     fetch: route,
     connect,
     accounts: () => stored.map(publicView),
