@@ -157,68 +157,86 @@ export const createPlc = async ({ file }: PlcOptions = {}): Promise<Plc> => {
     }
   };
 
-  return {
-    async fetch(request) {
-      const url = new URL(request.url);
+  const handle = async (request: Request): Promise<Response> => {
+    const url = new URL(request.url);
 
-      if (url.pathname === "/_health") {
-        return json({ version: "terrarium" });
+    if (url.pathname === "/_health") {
+      return json({ version: "terrarium" });
+    }
+
+    const [, encoded = "", ...rest] = url.pathname.split("/");
+    const did = decodeURIComponent(encoded);
+    const route = rest.join("/");
+
+    if (request.method === "POST" && route === "") {
+      return submit(did, await request.json());
+    }
+
+    const log = (logs.get(did) ?? []).filter((entry) => !entry.nullified);
+    const last = log.at(-1);
+
+    if (request.method !== "GET" || !last) {
+      return notFound(did);
+    }
+
+    switch (route) {
+      case "": {
+        const document = documentOf(did, last);
+
+        return document ? json(document) : notFound(did);
       }
-
-      const [, encoded = "", ...rest] = url.pathname.split("/");
-      const did = decodeURIComponent(encoded);
-      const route = rest.join("/");
-
-      if (request.method === "POST" && route === "") {
-        return submit(did, await request.json());
-      }
-
-      const log = (logs.get(did) ?? []).filter((entry) => !entry.nullified);
-      const last = log.at(-1);
-
-      if (request.method !== "GET" || !last) {
-        return notFound(did);
-      }
-
-      switch (route) {
-        case "": {
-          const document = documentOf(did, last);
-
-          return document ? json(document) : notFound(did);
-        }
-        case "data": {
-          if (last.operation.type === "plc_tombstone") {
-            return notFound(did);
-          }
-
-          const { rotationKeys, verificationMethods, alsoKnownAs, services } =
-            normalizeOp(last.operation);
-
-          return json({
-            did,
-            rotationKeys,
-            verificationMethods,
-            alsoKnownAs,
-            services
-          });
-        }
-        case "log": {
-          return json(log.map((entry) => entry.operation));
-        }
-        case "log/last": {
-          return json(last.operation);
-        }
-        case "log/audit": {
-          return json(
-            (logs.get(did) ?? []).map(
-              ({ allowedSigners: _, signedBy: __, ...entry }) => entry
-            )
-          );
-        }
-        default: {
+      case "data": {
+        if (last.operation.type === "plc_tombstone") {
           return notFound(did);
         }
+
+        const { rotationKeys, verificationMethods, alsoKnownAs, services } =
+          normalizeOp(last.operation);
+
+        return json({
+          did,
+          rotationKeys,
+          verificationMethods,
+          alsoKnownAs,
+          services
+        });
       }
+      case "log": {
+        return json(log.map((entry) => entry.operation));
+      }
+      case "log/last": {
+        return json(last.operation);
+      }
+      case "log/audit": {
+        return json(
+          (logs.get(did) ?? []).map(
+            ({ allowedSigners: _, signedBy: __, ...entry }) => entry
+          )
+        );
+      }
+      default: {
+        return notFound(did);
+      }
+    }
+  };
+
+  return {
+    // Readable from any page, as plc.directory is, so a browser app can resolve DIDs here too.
+    async fetch(request) {
+      const response =
+        request.method === "OPTIONS"
+          ? new Response(null, {
+              status: 204,
+              headers: {
+                "access-control-allow-methods": "GET, POST",
+                "access-control-allow-headers": "content-type"
+              }
+            })
+          : await handle(request);
+
+      response.headers.set("access-control-allow-origin", "*");
+
+      return response;
     }
   };
 };
