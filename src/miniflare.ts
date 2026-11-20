@@ -44,7 +44,7 @@ export const outbound =
   };
 
 /**
- * Put a Worker running under Miniflare inside the sandbox at a `.test` host, so PDSes and pages there can reach it: an OAuth client's metadata, its callback. Returns how to take it away again.
+ * Put a Worker running under Miniflare inside the sandbox at a `.test` or `.internal` host (`.internal` for an OAuth client), so PDSes and pages there can reach it: an OAuth client's metadata, its callback. Returns how to take it away again.
  *
  *     mount(terrarium, "app.example.test", miniflare);
  */

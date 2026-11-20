@@ -6,12 +6,13 @@ import { startCirrus, type CirrusEngine } from "./engines/cirrus";
 import {
   dohAnswer,
   dohHandle,
-  isTestHost,
+  isSandboxHost,
   JETSTREAM_HOSTS,
   JETSTREAM_URL,
   PDS_DOMAIN,
   PLC_HOST
 } from "./hosts";
+import { appview, APPVIEW_HOSTS, type Profile } from "./appview";
 import { createJetstream, filterFrom, type Jetstream } from "./jetstream";
 import { keyFrom, newKey } from "./keys";
 import { createPlc } from "./plc";
@@ -129,7 +130,7 @@ export interface Terrarium {
   /** Whether a request is Terrarium's own traffic, to the `workerd` processes behind its PDSes, which an interceptor in the same process must let through untouched. */
   internal(url: string | URL): boolean;
   /**
-   * Put an app inside the sandbox at a `.test` host, so everything else there can reach it: a PDS fetching its OAuth client metadata or a page following a redirect back to it. Returns how to take it away again.
+   * Put an app inside the sandbox at a `.test` or `.internal` host (`.internal` for an OAuth client, which atproto's OAuth libraries refuse to be at `.test`), so everything else there can reach it: a PDS fetching its OAuth client metadata or a page following a redirect back to it. Returns how to take it away again.
    *
    *     terrarium.mount("app.example.test", (request) => miniflare.dispatchFetch(request));
    */
@@ -311,10 +312,42 @@ export const createTerrarium = async ({
     return (
       url.hostname === PLC_HOST ||
       isJetstream(url) ||
-      isTestHost(url.hostname) ||
+      APPVIEW_HOSTS.has(url.hostname) ||
+      isSandboxHost(url.hostname) ||
       (doh !== undefined && byHandle(doh) !== undefined)
     );
   };
+
+  /** An account's `app.bsky.actor.profile`, for the AppView to show. */
+  const profileOf = async (
+    account: StoredAccount
+  ): Promise<Profile | undefined> => {
+    const engine = engines.get(new URL(account.endpoint).host);
+    const response = await engine?.fetch(
+      new Request(
+        `${account.endpoint}/xrpc/com.atproto.repo.getRecord?repo=${account.did}&collection=app.bsky.actor.profile&rkey=self`
+      )
+    );
+    const parsed = v.safeParse(
+      v.object({
+        value: v.object({
+          displayName: v.optional(v.string()),
+          description: v.optional(v.string())
+        })
+      }),
+      response?.ok ? await response.json() : undefined
+    );
+
+    return parsed.success ? parsed.output.value : undefined;
+  };
+
+  const bluesky = appview(() =>
+    stored.map((account) => ({
+      did: account.did,
+      handle: account.handle,
+      profile: async (): Promise<Profile | undefined> => profileOf(account)
+    }))
+  );
 
   const route = async (request: Request): Promise<Response> => {
     const url = new URL(request.url);
@@ -328,6 +361,10 @@ export const createTerrarium = async ({
 
     if (isJetstream(url)) {
       return new Response("Jetstream speaks WebSocket.", { status: 426 });
+    }
+
+    if (APPVIEW_HOSTS.has(url.hostname)) {
+      return bluesky(request);
     }
 
     const engine = engines.get(url.host);
@@ -434,9 +471,9 @@ export const createTerrarium = async ({
         (engine) => new URL(url).origin === engine.runtime
       ),
     mount(appHost, handler) {
-      if (!isTestHost(appHost)) {
+      if (!isSandboxHost(appHost)) {
         throw new Error(
-          `Apps mount at .test hosts, which can't exist outside the sandbox: ${appHost} could.`
+          `Apps mount at .test or .internal hosts, which can't exist outside the sandbox: ${appHost} could.`
         );
       }
 

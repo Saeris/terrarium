@@ -67,6 +67,10 @@ export const dohAnswer = (
   );
 };
 
-/** `.test` hosts are always Terrarium's: they can't exist anywhere else. */
-export const isTestHost = (hostname: string): boolean =>
-  hostname === "test" || hostname.endsWith(".test");
+/**
+ * Hosts under the reserved `.test` and `.internal` TLDs are always Terrarium's: they can't exist on the public internet, so nothing aimed at the sandbox can leak. Apps mount under either; `.internal` is the one OAuth clients accept for themselves, since atproto's OAuth libraries treat `.test` as a local hostname.
+ */
+export const isSandboxHost = (hostname: string): boolean =>
+  ["test", "internal"].some(
+    (tld) => hostname === tld || hostname.endsWith(`.${tld}`)
+  );

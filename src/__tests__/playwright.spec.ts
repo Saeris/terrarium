@@ -31,6 +31,55 @@ describe("terrarium inside a Playwright browser", () => {
     await terrarium.dispose();
   });
 
+  it("follows a redirect from an app to a PDS, as a sign-in does, keeping the app's cookie", async () => {
+    terrarium.mount("app.example.internal", async (request) =>
+      new URL(request.url).pathname === "/sign-in"
+        ? new Response(null, {
+            status: 302,
+            headers: {
+              location: `${alice.endpoint}/xrpc/com.atproto.repo.describeRepo?repo=${alice.did}`,
+              "set-cookie": "state=abc; Path=/; Secure; HttpOnly"
+            }
+          })
+        : new Response("app")
+    );
+
+    const page = await context.newPage();
+
+    await page.goto("https://app.example.internal/sign-in");
+    await page.waitForURL((url) => url.hostname === "alice.terrarium.test");
+
+    await expect(page.locator("body").innerText()).resolves.toContain(
+      alice.did
+    );
+    await expect(
+      context.cookies("https://app.example.internal")
+    ).resolves.toMatchObject([{ name: "state", value: "abc" }]);
+  });
+
+  it("follows a redirect inside fetch, as the browser would", async () => {
+    terrarium.mount("api.example.internal", async (request) =>
+      new URL(request.url).pathname === "/moved"
+        ? new Response(null, {
+            status: 303,
+            headers: { location: "https://api.example.internal/here" }
+          })
+        : new Response("arrived", {
+            headers: { "access-control-allow-origin": "*" }
+          })
+    );
+
+    const page = await context.newPage();
+
+    await page.goto(`${alice.endpoint}/`);
+
+    await expect(
+      page.evaluate(async () =>
+        (await fetch("https://api.example.internal/moved")).text()
+      )
+    ).resolves.toBe("arrived");
+  });
+
   it("navigates to an account's PDS, as an OAuth redirect does", async () => {
     const page = await context.newPage();
     const response = await page.goto(
