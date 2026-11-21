@@ -24,6 +24,40 @@ export default {
       return Response.json({ pds, text: record.value.text });
     }
 
+    // Catching up as a Durable Object's alarm would: open Jetstream from a cursor, read what's there, hang up.
+    if (url.pathname === "/jetstream") {
+      const did = url.searchParams.get("did");
+      const response = await fetch("https://jetstream2.us-east.bsky.network/subscribe?cursor=0&wantedCollections=${NOTE}&wantedDids=" + did, { headers: { upgrade: "websocket" } });
+      const socket = response.webSocket;
+
+      if (!socket) {
+        return new Response(null, { status: response.status });
+      }
+
+      socket.accept();
+
+      const { commit } = await new Promise((resolve) => {
+        socket.addEventListener("message", (event) => resolve(JSON.parse(event.data)));
+      });
+
+      socket.close();
+
+      return Response.json({ rkey: commit.rkey, text: commit.record.text });
+    }
+
+    if (url.pathname === "/firehose") {
+      const response = await fetch(url.searchParams.get("pds") + "/xrpc/com.atproto.sync.subscribeRepos", { headers: { upgrade: "websocket" } });
+      const socket = response.webSocket;
+
+      socket.accept();
+
+      const { code, reason } = await new Promise((resolve) => {
+        socket.addEventListener("close", resolve);
+      });
+
+      return Response.json({ code, reason });
+    }
+
     if (url.pathname === "/elsewhere") {
       return new Response(null, { status: (await fetch("https://example.com/")).status });
     }
@@ -68,6 +102,30 @@ describe("terrarium as a Worker's network", () => {
     await expect(response.json()).resolves.toEqual({
       pds: "https://alice.terrarium.test",
       text: "hello, worker"
+    });
+  });
+
+  // An AppView in a Durable Object can't hold Jetstream open without paying for every second of it, so it catches up on a schedule: the socket has to work from inside workerd, cursor and all.
+  it("follows Jetstream from inside workerd, replaying from a cursor", async () => {
+    const response = await app.dispatchFetch(
+      `http://app/jetstream?did=${alice.did}`
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      rkey: "hello",
+      text: "hello, worker"
+    });
+  });
+
+  // A socket that opened and never spoke would look like a quiet stream, and a test waiting on it would hang instead of failing.
+  it("hangs up, saying why, on a socket it can't serve", async () => {
+    const response = await app.dispatchFetch(
+      `http://app/firehose?pds=${alice.endpoint}`
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      code: 1011,
+      reason: expect.stringContaining("Jetstream")
     });
   });
 
