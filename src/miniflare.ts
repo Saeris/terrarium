@@ -1,7 +1,8 @@
-import type {
-  Miniflare,
-  Request as WorkerRequest,
-  Response as WorkerResponse
+import {
+  type Miniflare,
+  type Request as WorkerRequest,
+  Response as WorkerResponse,
+  WebSocketPair
 } from "miniflare";
 import {
   fromWorker,
@@ -25,9 +26,54 @@ export interface OutboundOptions {
   readonly unowned?: Unowned;
 }
 
+/**
+ * Jetstream for a Worker that opened a socket to it. One end of a pair goes back in the 101, for Miniflare to couple to the Worker's socket; the sandbox feeds the other. Jetstream is the only socket a Worker can open in the sandbox: anything else is hung up on with a reason, rather than left to look like a quiet stream.
+ */
+const socketTo = (terrarium: Terrarium, url: string): WorkerResponse => {
+  const { 0: client, 1: server } = new WebSocketPair();
+  const jetstream = terrarium.connect(url);
+  let ended = false;
+  let hungUp = false;
+  const hangUp = (code?: number, reason?: string): void => {
+    ended = true;
+
+    if (!hungUp) {
+      hungUp = true;
+      server.close(code, reason);
+    }
+  };
+
+  server.accept();
+  jetstream.onmessage = ({ data }): void => {
+    if (!ended) {
+      server.send(data);
+    }
+  };
+  jetstream.onerror = (): void => {
+    hangUp(1011, `Only Jetstream's /subscribe takes a socket here: ${url}`);
+  };
+  jetstream.onclose = (): void => {
+    hangUp();
+  };
+  // The Worker hanging up: stop the subscription, and answer its close.
+  server.addEventListener("close", () => {
+    ended = true;
+    jetstream.close();
+  });
+
+  return new WorkerResponse(null, { status: 101, webSocket: client });
+};
+
 export const outbound =
   (terrarium: Terrarium, { unowned = "network" }: OutboundOptions = {}) =>
   async (request: WorkerRequest): Promise<WorkerResponse> => {
+    if (
+      request.headers.get("upgrade")?.toLowerCase() === "websocket" &&
+      terrarium.owns(request.url)
+    ) {
+      return socketTo(terrarium, request.url);
+    }
+
     const standard = await fromWorker(request);
 
     if (terrarium.owns(standard.url)) {

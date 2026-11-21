@@ -88,7 +88,7 @@ const app = new Miniflare({
 mount(terrarium, "app.example.test", app); // https://app.example.test, for PDSes and Playwright pages alike
 ```
 
-`outbound` sends what Terrarium doesn’t own to the real network, or refuses it with `{ unowned: "refuse" }`.
+`outbound` sends what Terrarium doesn’t own to the real network, or refuses it with `{ unowned: "refuse" }`. A Worker or Durable Object that opens a WebSocket to Jetstream gets the sandbox’s, cursor and filters included.
 
 Or let Terrarium do all of that from the app’s Wrangler config: bundled as `wrangler deploy` bundles it, with its bindings, Durable Objects, assets and `.dev.vars` as `wrangler dev` reads them.
 
@@ -238,7 +238,7 @@ Add your state directory to `.gitignore`: it holds every account's keys and pass
 
 ## 🚧 Not yet
 
-- **WebSockets out of a Worker**, such as a Worker following Jetstream: `outbound` answers HTTP only.
+- **A PDS’s firehose out of a Worker**: the only WebSocket `outbound` carries is Jetstream’s.
 - **The reference PDS** as a second engine, for accounts that must behave exactly like bsky.social's, and for atproto spaces once their beta lands.
 - **Node's own DNS.** `_atproto` TXT lookups through `node:dns` aren't intercepted, only DNS-over-HTTPS and `/.well-known/atproto-did`.
 - **Other Bluesky services**, such as the AppView's `public.api.bsky.app`.
