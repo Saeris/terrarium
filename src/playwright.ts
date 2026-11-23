@@ -1,7 +1,8 @@
 import type { BrowserContext, Page, Route } from "playwright-core";
 import { JETSTREAM_HOSTS, isLoopback, refuse, type Unowned } from "./hosts";
-import { filterFrom } from "./jetstream";
-import type { Terrarium } from "./terrarium";
+import { accept, SUBSCRIBE } from "./jetstream";
+import { SUBSCRIBE_EVENTS } from "./jetstream-v2";
+import type { Account, Terrarium } from "./terrarium";
 
 /**
  * Terrarium inside a Playwright browser: every request a page makes to an address Terrarium owns is answered by the sandbox, including top-level navigations, so an OAuth redirect to an account's PDS lands on that PDS's real sign-in page. Bluesky's Jetstream addresses are answered too, over WebSocket. Nothing else is touched.
@@ -145,14 +146,30 @@ export const route = async (
   await target.routeWebSocket(
     (url) => JETSTREAM_HOSTS.has(url.hostname),
     (socket) => {
-      const stop = terrarium.jetstream.subscribe(
-        filterFrom(new URL(socket.url())),
-        (event) => {
-          socket.send(JSON.stringify(event));
+      const connection = accept(terrarium.jetstream, new URL(socket.url()), {
+        send(frame) {
+          socket.send(frame);
+        },
+        close(code, reason) {
+          void socket.close({ code, reason });
         }
-      );
+      });
 
-      socket.onClose(stop);
+      if (!connection) {
+        void socket.close({
+          code: 1008,
+          reason: `Jetstream subscribes at ${SUBSCRIBE} or ${SUBSCRIBE_EVENTS}.`
+        });
+
+        return;
+      }
+
+      socket.onMessage(() => {
+        connection.receive();
+      });
+      socket.onClose(() => {
+        connection.close();
+      });
     }
   );
 
@@ -170,5 +187,66 @@ export const route = async (
       refuse(socket.url());
       await socket.close({ code: 1008, reason: "Refused by Terrarium" });
     });
+  }
+};
+
+/**
+ * Sign an account in on its PDS's own page, as a person would, once the app under test has sent the page there: the password, then Allow. Resolves when the PDS has sent the page back to the app. When the PDS won't let it through, it throws with what the page says, rather than leaving a test to time out on a page that never moves.
+ *
+ *     await page.getByRole("button", { name: "Sign in" }).click();
+ *     await signIn(page, alice);
+ *     await expect(page.getByText("Signed in as alice.test")).toBeVisible();
+ */
+export const signIn = async (page: Page, account: Account): Promise<void> => {
+  const onPds = (url: URL): boolean => url.origin === account.endpoint;
+
+  await page.waitForURL(
+    (url) => onPds(url) && url.pathname === "/oauth/authorize"
+  );
+
+  const allow = page.getByRole("button", { name: "Allow" });
+
+  // An authorization the PDS refused outright (an unknown client, a redirect the client doesn't list) gets a page with no form.
+  if ((await allow.count()) === 0) {
+    throw new Error(
+      `${account.handle}'s PDS refused the authorization: ${await page.locator("body").innerText()}`
+    );
+  }
+
+  if (await allow.isDisabled()) {
+    throw new Error(
+      `${account.handle}'s PDS can't show everything the app asks for: ${await page.locator(".permissions-warning").innerText()}`
+    );
+  }
+
+  await page.getByPlaceholder("Password").fill(account.password);
+
+  await allow.click();
+
+  const refusal = page.locator(".error-message");
+  const leaves = async (): Promise<undefined> => {
+    await page.waitForURL((url) => !onPds(url));
+
+    return undefined;
+  };
+  const refused = async (): Promise<string> => {
+    await refusal.waitFor();
+
+    return refusal.innerText();
+  };
+  let reason: string | undefined;
+
+  try {
+    // Only one of them happens: the other gives up when the page goes, unheard.
+    reason = await Promise.any([leaves(), refused()]);
+  } catch (error) {
+    throw new Error(
+      `${account.handle}'s PDS kept the page, without saying why.`,
+      { cause: error }
+    );
+  }
+
+  if (reason !== undefined) {
+    throw new Error(`${account.handle}'s PDS refused the sign-in: ${reason}`);
   }
 };

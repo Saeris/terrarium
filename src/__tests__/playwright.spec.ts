@@ -1,8 +1,15 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import {
+  CompositeDidDocumentResolver,
+  LocalActorResolver,
+  PlcDidDocumentResolver,
+  WellKnownHandleResolver
+} from "@atcute/identity-resolver";
+import { MemoryStore, OAuthClient } from "@atcute/oauth-node-client";
 import { chromium, type Browser, type BrowserContext } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
-import { route } from "../playwright";
+import { route, signIn } from "../playwright";
 import { createTerrarium, type Account, type Terrarium } from "../terrarium";
 
 /**
@@ -151,6 +158,43 @@ describe("terrarium inside a Playwright browser", () => {
     await expect(arrived).resolves.toBe("seen by the page");
   });
 
+  it("follows Jetstream's v2 stream from inside the page, subprotocol and all", async () => {
+    const page = await context.newPage();
+    const since = Date.now() * 1000;
+
+    await page.goto(`${alice.endpoint}/`);
+    await terrarium.seed("alice", [
+      { collection: NOTE, record: { text: "v2 in the page" } }
+    ]);
+    // Long enough for the write to reach Jetstream, to be replayed from the time.
+    await page.waitForTimeout(300);
+
+    const first = await page.evaluate(
+      async ({ did, cursor }) =>
+        new Promise<unknown>((resolve) => {
+          const socket = new WebSocket(
+            `wss://jetstream2.us-east.bsky.network/xrpc/network.bsky.jetstream.subscribeEvents?dids=${did}&cursor=${cursor}`,
+            "xrpc.v1.json"
+          );
+
+          socket.addEventListener("message", (event: { data: unknown }) => {
+            resolve(JSON.parse(String(event.data)));
+          });
+          socket.addEventListener("close", ({ code, reason }) => {
+            resolve({ code, reason });
+          });
+        }),
+      { did: alice.did, cursor: String(since) }
+    );
+
+    expect(first).toMatchObject({
+      payload: {
+        $type: "network.bsky.jetstream.subscribeEvents#commit",
+        record: { text: "v2 in the page" }
+      }
+    });
+  });
+
   it("keeps the page off the internet when asked, but not off this machine, where the app under test runs", async () => {
     const local = createServer((_, response) => {
       response.end("local");
@@ -185,5 +229,101 @@ describe("terrarium inside a Playwright browser", () => {
 
     await strict.close();
     local.close();
+  });
+
+  describe("signing in with OAuth", () => {
+    const app = "https://oauth.example.internal";
+    let client: OAuthClient;
+
+    beforeAll(() => {
+      // The app's own OAuth client, as it would run on its server: it reaches the sandbox through the fetch it's given.
+      const sandboxFetch: typeof fetch = async (input, init) =>
+        terrarium.fetch(new Request(input, init));
+
+      client = new OAuthClient({
+        metadata: {
+          client_id: `${app}/client-metadata.json`,
+          client_name: "Example",
+          redirect_uris: [`${app}/callback`],
+          scope: `atproto repo:${NOTE}`
+        },
+        actorResolver: new LocalActorResolver({
+          handleResolver: new WellKnownHandleResolver({ fetch: sandboxFetch }),
+          didDocumentResolver: new CompositeDidDocumentResolver({
+            methods: {
+              plc: new PlcDidDocumentResolver({ fetch: sandboxFetch })
+            }
+          })
+        }),
+        stores: { sessions: new MemoryStore(), states: new MemoryStore() },
+        fetch: sandboxFetch
+      });
+
+      terrarium.mount("oauth.example.internal", async (request) => {
+        const url = new URL(request.url);
+
+        switch (url.pathname) {
+          case "/client-metadata.json":
+            return Response.json(client.metadata);
+          case "/sign-in": {
+            const { url: authorize } = await client.authorize({
+              target: {
+                type: "account",
+                identifier: alice.handle as `${string}.${string}`
+              }
+            });
+
+            return Response.redirect(authorize.href, 302);
+          }
+          case "/callback": {
+            const { session } = await client.callback(url.searchParams);
+
+            return new Response(`Signed in as ${session.did}`);
+          }
+          default:
+            return new Response("Not found", { status: 404 });
+        }
+      });
+    });
+
+    it("signs an account in on its PDS's own page, and the app's session writes as her", async () => {
+      const page = await context.newPage();
+
+      await page.goto(`${app}/sign-in`);
+      await signIn(page, alice);
+
+      await expect(page.locator("body").innerText()).resolves.toBe(
+        `Signed in as ${alice.did}`
+      );
+
+      // The tokens are real: DPoP-bound, scoped, and accepted by her PDS for a write.
+      const session = await client.restore(alice.did);
+      const created = await session.handle(
+        "/xrpc/com.atproto.repo.createRecord",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            repo: alice.did,
+            collection: NOTE,
+            record: { $type: NOTE, text: "signed in" }
+          })
+        }
+      );
+
+      expect(created.status).toBe(200);
+    });
+
+    it("says why the PDS refused, rather than waiting on a page that never moves", async () => {
+      const page = await context.newPage();
+
+      await page.goto(`${app}/sign-in`);
+
+      await expect(
+        signIn(page, { ...alice, password: "not her password" })
+      ).rejects.toThrow(
+        "alice.test's PDS refused the sign-in: Invalid password"
+      );
+    });
   });
 });

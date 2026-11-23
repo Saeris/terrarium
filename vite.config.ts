@@ -21,7 +21,8 @@ export default defineConfig({
       "src/playwright.ts",
       "src/miniflare.ts",
       "src/wrangler.ts",
-      "src/register.ts"
+      "src/register.ts",
+      "src/vite.ts"
     ],
     clean: true,
     format: [`esm`],

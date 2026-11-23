@@ -50,11 +50,19 @@ const socketTo = (terrarium: Terrarium, url: string): WorkerResponse => {
     }
   };
   jetstream.onerror = (): void => {
-    hangUp(1011, `Only Jetstream's /subscribe takes a socket here: ${url}`);
+    hangUp(1011, `Only Jetstream takes a socket here: ${url}`);
   };
-  jetstream.onclose = (): void => {
-    hangUp();
+  jetstream.onclose = ({ code, reason }): void => {
+    // A Worker can't be sent the codes that only say no code came.
+    if (code === 1005 || code === 1006) {
+      hangUp();
+    } else {
+      hangUp(code, reason);
+    }
   };
+  server.addEventListener("message", ({ data }) => {
+    jetstream.send(typeof data === "string" ? data : "");
+  });
   // The Worker hanging up: stop the subscription, and answer its close.
   server.addEventListener("close", () => {
     ended = true;

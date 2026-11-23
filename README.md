@@ -63,6 +63,18 @@ await page.goto("https://your.app/");
 
 Every request a page makes to Terrarium's addresses is answered by the sandbox, including top-level navigations, so an OAuth redirect lands on the account's PDS sign-in page. Jetstream is answered over WebSocket. No TLS or DNS is involved: Playwright hands the request over before it reaches the network.
 
+Once the app has sent the page to that sign-in page, `signIn` does what a person would there: types the account's password, presses Allow, and waits for the PDS to send the page back to the app.
+
+```ts
+import { route, signIn } from "@saeris/terrarium/playwright";
+
+await page.getByLabel("Handle").fill(alice.handle); // your app's own sign-in form
+await page.getByRole("button", { name: "Sign in" }).click();
+await signIn(page, alice);
+```
+
+If the PDS won't let the account through, `signIn` throws with what the page says, such as `alice.test's PDS refused the sign-in: Invalid password`, rather than leaving the test to time out. The app's OAuth client must be inside the sandbox, at a `.internal` host, so the PDS can fetch its client metadata: see [On Cloudflare Workers](#on-cloudflare-workers-with-miniflare) for an app on Workers, or `terrarium.mount` for one in the test's own process.
+
 ### In another Node process
 
 An app’s dev server, or any script, can use a running sandbox (`terrarium start`) without a line of it changing: preload the interceptor.
@@ -72,6 +84,47 @@ TERRARIUM_URL=http://127.0.0.1:2580 node --import @saeris/terrarium/register ser
 ```
 
 That process’s requests to the sandbox’s addresses are forwarded to the sandbox (Mock Service Worker intercepts them in that process), its Jetstream connections are piped to the sandbox’s Jetstream, and everything else goes where it always did. For a dev server started by a tool, pass it through `NODE_OPTIONS="--import @saeris/terrarium/register"`.
+
+Or let `terrarium run` do both, in one shell:
+
+```bash
+terrarium run "yarn dev"                        # or "vp test", or anything else
+terrarium run "yarn dev" --unowned refuse       # and keep it off the network
+```
+
+It uses the sandbox already running at `--url` (`TERRARIUM_URL`, or the `--host` and `--port` it would start on) and leaves it running. With none there, it starts one for the command, from `--dir`, and stops it when the command ends. The command runs in a shell, so quote it as one argument; its output is its own, and it exits as the command did. Only Node processes are preloaded: a Worker under `wrangler dev` runs in `workerd`, which needs [Miniflare's outbound](#on-cloudflare-workers-with-miniflare).
+
+### In a Vite dev server
+
+Say what sandbox the app needs in `vite.config.ts`:
+
+```ts
+import { defineConfig } from "vite";
+import { terrarium } from "@saeris/terrarium/vite";
+import { menu } from "./fixtures/menu";
+
+export default defineConfig({
+  plugins: [
+    terrarium({
+      accounts: {
+        alice: {},
+        venue: {
+          handle: "venue.example.com",
+          records: (venue) => menu(venue.did) // [{ collection, rkey, record }]
+        }
+      }
+    })
+  ]
+});
+```
+
+`vite dev` then brings the sandbox up with those accounts, and points the dev server's own process at it as `@saeris/terrarium/register` would, so the app's server code (SSR, API routes, server functions) reaches it at the network's own addresses. A sandbox already running (at `TERRARIUM_URL`, or the plugin's `host` and `port`) is used and left running. Otherwise the dev server starts one, keeps it through restarts, and stops it when it closes. The plugin stays out of `vite build`, `vite preview` and Vitest, whose tests make their own sandboxes.
+
+An account is made if it's missing; one that's already there keeps its handle and password. Its `records` are written every time the sandbox starts, replacing what's there by rkey, so the config stays what's there: each needs an `rkey`, since one without would be added again every time. A function is given the account, for records that name it, such as an at:// URI with its DID.
+
+`terrarium start` and `terrarium run` read the same options from the `vite.config.*` in the directory they run in, or the file `--config` names, and their flags win over it. A Vite app needs neither: `terrarium start` is for one sandbox several apps share, and `terrarium run` for commands that aren't a Vite dev server.
+
+Only the dev server's process is pointed at the sandbox, not the page in your browser; a page reaches it under Playwright, with `route`.
 
 ### On Cloudflare Workers, with Miniflare
 
@@ -156,6 +209,16 @@ A running sandbox also answers on local ports, for clients nothing intercepts, s
 
 The same events and query parameters as Bluesky's Jetstream (`wantedDids`, `wantedCollections` with `.*` prefixes, and a microsecond `cursor` to replay from), fed straight from every PDS's firehose. It keeps the last 10,000 events for replaying; its history starts empty after a restart.
 
+Its v2 stream, which `@bsky/jetstream` reads, is at `/xrpc/network.bsky.jetstream.subscribeEvents` on the same hosts:
+
+- Frames are the lexicon's `{ $type: "message", payload }`.
+- Every event carries a `seq` to resume from, inclusively. A `cursor` of 10¹⁵ or more is a time in microseconds instead, and one older than what's kept is clamped, with an `OutdatedCursor` notice first.
+- The filters are `kinds`, `dids` and `collections`, and `collections` narrows only commits.
+- What it refuses closes the socket at once, with code 1008 and the error as the reason: `CursorTooOld: …` for a seq older than what's kept, or `InvalidRequest: v2 takes dids, not wantedDids.` for v1's names. Bluesky's answers these with an HTTP 400 before the socket opens.
+- A client sending anything ends the stream, as it does on Bluesky's.
+
+Not emulated: compression (`zstdDictionary` is refused), `maxMessageSizeBytes`, and `#sync` events.
+
 It can also misbehave on purpose, as a real relay does, so you can test what your app does about it:
 
 ```bash
@@ -225,14 +288,18 @@ Hand `terrarium.fetch` to a client that accepts a custom `fetch`, and `terrarium
 
 ## 🎛 Configuration
 
-| Option                             | CLI      | Default                                                        |
-| ---------------------------------- | -------- | -------------------------------------------------------------- |
-| State directory                    | `--dir`  | `.terrarium` (in memory for `createTerrarium()` without `dir`) |
-| Host every service is addressed by | `--host` | `127.0.0.1`                                                    |
-| Control API port                   | `--port` | `2580`                                                         |
-| PLC directory port                 |          | `2582`                                                         |
-| Jetstream port                     |          | `2584`                                                         |
-| First PDS port                     |          | `2600`, then one more per account                              |
+| Option                             | Vite plugin       | CLI                 | Default                                                        |
+| ---------------------------------- | ----------------- | ------------------- | -------------------------------------------------------------- |
+| State directory                    | `dir`             | `--dir`             | `.terrarium` (in memory for `createTerrarium()` without `dir`) |
+| Host every service is addressed by | `host`            | `--host`            | `127.0.0.1`                                                    |
+| Control API port                   | `port`            | `--port`            | `2580`                                                         |
+| PLC directory port                 | `ports.plc`       |                     | `2582`                                                         |
+| Jetstream port                     | `ports.jetstream` |                     | `2584`                                                         |
+| First PDS port                     | `ports.pds`       |                     | `2600`, then one more per account                              |
+| Accounts, and their records        | `accounts`        |                     | None                                                           |
+| Requests to anywhere else          | `unowned`         | `--unowned` (`run`) | `"network"`                                                    |
+
+The plugin's `dir` is relative to the Vite config. `ports` takes all three.
 
 Add your state directory to `.gitignore`: it holds every account's keys and password.
 

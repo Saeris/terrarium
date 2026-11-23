@@ -1,5 +1,6 @@
 import { control } from "./control";
-import { filterFrom } from "./jetstream";
+import { accept, SUBSCRIBE } from "./jetstream";
+import { SUBSCRIBE_EVENTS } from "./jetstream-v2";
 import { serve } from "./serve";
 import {
   createTerrarium,
@@ -36,6 +37,15 @@ export interface Server {
   close(): Promise<void>;
 }
 
+/** Whether a sandbox's control API answers at `url`. */
+export const isRunning = async (url: string): Promise<boolean> => {
+  try {
+    return (await fetch(`${url}/health`)).ok;
+  } catch {
+    return false;
+  }
+};
+
 export const startServer = async ({
   dir,
   host = DEFAULT_HOST,
@@ -64,17 +74,30 @@ export const startServer = async ({
     host,
     port: ports.jetstream,
     upgrade(url, socket) {
-      if (url.pathname !== "/subscribe") {
-        socket.close(1008, "Jetstream subscribes at /subscribe.");
+      const connection = accept(terrarium.jetstream, url, {
+        send(frame) {
+          socket.send(frame);
+        },
+        close(code, reason) {
+          socket.close(code, reason);
+        }
+      });
+
+      if (!connection) {
+        socket.close(
+          1008,
+          `Jetstream subscribes at ${SUBSCRIBE} or ${SUBSCRIBE_EVENTS}.`
+        );
 
         return;
       }
 
-      const stop = terrarium.jetstream.subscribe(filterFrom(url), (event) => {
-        socket.send(JSON.stringify(event));
+      socket.on("message", () => {
+        connection.receive();
       });
-
-      socket.on("close", stop);
+      socket.on("close", () => {
+        connection.close();
+      });
     }
   });
 

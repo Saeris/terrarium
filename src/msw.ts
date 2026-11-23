@@ -2,7 +2,8 @@ import { passthrough } from "msw";
 import { http, type HttpHandler } from "msw/http";
 import { ws, type WebSocketHandler } from "msw/ws";
 import { JETSTREAM_HOSTS } from "./hosts";
-import { filterFrom } from "./jetstream";
+import { accept, SUBSCRIBE } from "./jetstream";
+import { SUBSCRIBE_EVENTS } from "./jetstream-v2";
 import type { Terrarium } from "./terrarium";
 
 /**
@@ -25,18 +26,23 @@ export const handlers = (
     ({ request }) => terrarium.owns(request.url),
     async ({ request }) => terrarium.fetch(request)
   ),
-  ...[...JETSTREAM_HOSTS].map((host) =>
-    ws
-      .link(`wss://${host}/subscribe`)
-      .addEventListener("connection", ({ client }) => {
-        const stop = terrarium.jetstream.subscribe(
-          filterFrom(client.url),
-          (event) => {
-            client.send(JSON.stringify(event));
-          }
-        );
+  ...[...JETSTREAM_HOSTS].flatMap((host) =>
+    [SUBSCRIBE, SUBSCRIBE_EVENTS].map((path) =>
+      ws
+        .link(`wss://${host}${path}`)
+        .addEventListener("connection", ({ client }) => {
+          const connection = accept(terrarium.jetstream, client.url, {
+            send(frame) {
+              client.send(frame);
+            },
+            close(code, reason) {
+              client.close(code, reason);
+            }
+          });
 
-        client.addEventListener("close", stop);
-      })
+          client.addEventListener("message", () => connection?.receive());
+          client.addEventListener("close", () => connection?.close());
+        })
+    )
   )
 ];

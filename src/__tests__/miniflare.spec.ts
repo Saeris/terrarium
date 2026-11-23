@@ -45,6 +45,25 @@ export default {
       return Response.json({ rkey: commit.rkey, text: commit.record.text });
     }
 
+    // The same on Jetstream's v2 stream: its first frame, or how it hung up.
+    if (url.pathname === "/jetstream-v2") {
+      const response = await fetch("https://jetstream2.us-east.bsky.network/xrpc/network.bsky.jetstream.subscribeEvents?kinds=commit&collections=${NOTE}&dids=" + url.searchParams.get("did") + "&cursor=" + url.searchParams.get("cursor"), { headers: { upgrade: "websocket" } });
+      const socket = response.webSocket;
+
+      socket.accept();
+
+      const first = await new Promise((resolve) => {
+        socket.addEventListener("message", (event) => resolve(JSON.parse(event.data)));
+        socket.addEventListener("close", ({ code, reason }) => resolve({ code, reason }));
+      });
+
+      if (!("code" in first)) {
+        socket.close();
+      }
+
+      return Response.json(first);
+    }
+
     if (url.pathname === "/firehose") {
       const response = await fetch(url.searchParams.get("pds") + "/xrpc/com.atproto.sync.subscribeRepos", { headers: { upgrade: "websocket" } });
       const socket = response.webSocket;
@@ -114,6 +133,28 @@ describe("terrarium as a Worker's network", () => {
     await expect(response.json()).resolves.toEqual({
       rkey: "hello",
       text: "hello, worker"
+    });
+  });
+
+  it("speaks Jetstream's v2 stream from inside workerd too, refusals and all", async () => {
+    const replayed = await app.dispatchFetch(
+      `http://app/jetstream-v2?did=${alice.did}&cursor=1`
+    );
+    const refused = await app.dispatchFetch(
+      `http://app/jetstream-v2?did=${alice.did}&cursor=0`
+    );
+
+    await expect(replayed.json()).resolves.toMatchObject({
+      $type: "message",
+      payload: {
+        $type: "network.bsky.jetstream.subscribeEvents#commit",
+        rkey: "hello",
+        record: { text: "hello, worker" }
+      }
+    });
+    await expect(refused.json()).resolves.toEqual({
+      code: 1008,
+      reason: expect.stringContaining("CursorTooOld")
     });
   });
 
