@@ -178,7 +178,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@atcute/identity@npm:^2.0.2":
+"@atcute/identity@npm:^2.0.1, @atcute/identity@npm:^2.0.2":
   version: 2.0.2
   resolution: "@atcute/identity@npm:2.0.2"
   dependencies:
@@ -236,7 +236,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@atcute/lexicons@npm:^2.0.3, @atcute/lexicons@npm:^2.1.0, @atcute/lexicons@npm:^2.1.1":
+"@atcute/lexicons@npm:^2.0.2, @atcute/lexicons@npm:^2.0.3, @atcute/lexicons@npm:^2.1.0, @atcute/lexicons@npm:^2.1.1":
   version: 2.1.1
   resolution: "@atcute/lexicons@npm:2.1.1"
   dependencies:
@@ -263,12 +263,66 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@atcute/multibase@npm:^1.2.5":
+"@atcute/multibase@npm:^1.2.4, @atcute/multibase@npm:^1.2.5":
   version: 1.2.5
   resolution: "@atcute/multibase@npm:1.2.5"
   dependencies:
     "@atcute/uint8array": "npm:^1.1.5"
   checksum: 10/fa06e933f877a561927ed81de20eb3054057beb0e08b2c3976603aa73d8e5d9fb97e705b47432b9a240e0a8ccf4f2b27ba9572a997efb28a13b97a2a79e17000
+  languageName: node
+  linkType: hard
+
+"@atcute/oauth-crypto@npm:^1.0.1":
+  version: 1.0.1
+  resolution: "@atcute/oauth-crypto@npm:1.0.1"
+  dependencies:
+    "@atcute/multibase": "npm:^1.2.4"
+    "@atcute/uint8array": "npm:^1.1.3"
+    nanoid: "npm:^5.1.16"
+    valibot: "npm:^1.4.1"
+  checksum: 10/c715476fa3a645bebbe15aa678f9ca7ebb879c96cbf420c9b7bd2b2af4f534ac4c5098a9e9b46b62e0fdcec7b8dee4e1763b648b6c9538fbad92626e11b9f1d3
+  languageName: node
+  linkType: hard
+
+"@atcute/oauth-keyset@npm:^0.1.2, @atcute/oauth-keyset@npm:^0.1.3":
+  version: 0.1.3
+  resolution: "@atcute/oauth-keyset@npm:0.1.3"
+  dependencies:
+    "@atcute/oauth-crypto": "npm:^1.0.1"
+  checksum: 10/4531b88ae0488d950702d5ea03bacaedb619df4171c78577d7629da31ec8a64646dbdb868a3a5ead2de7eebffccf2be661e784aa7619a4429241e8d0fc88ffe9
+  languageName: node
+  linkType: hard
+
+"@atcute/oauth-node-client@npm:^2.1.0":
+  version: 2.1.0
+  resolution: "@atcute/oauth-node-client@npm:2.1.0"
+  dependencies:
+    "@atcute/client": "npm:^5.1.2"
+    "@atcute/identity": "npm:^2.0.2"
+    "@atcute/identity-resolver": "npm:^2.0.3"
+    "@atcute/lexicons": "npm:^2.1.1"
+    "@atcute/oauth-crypto": "npm:^1.0.1"
+    "@atcute/oauth-keyset": "npm:^0.1.3"
+    "@atcute/oauth-types": "npm:^1.0.1"
+    "@atcute/util-fetch": "npm:^2.1.0"
+    nanoid: "npm:^6.0.2"
+    valibot: "npm:^1.5.0"
+  peerDependencies:
+    "@atcute/identity-resolver": ^2.0.0
+    "@atcute/lexicons": ^2.0.0
+  checksum: 10/335fabc712fd15a1aa9577feb815a455225f2c3b5716db758019f65f4df3feb659382259877f7b254345324923fa7abaaa223f26d4dbe045c6d40e63b2cca4db
+  languageName: node
+  linkType: hard
+
+"@atcute/oauth-types@npm:^1.0.1":
+  version: 1.0.1
+  resolution: "@atcute/oauth-types@npm:1.0.1"
+  dependencies:
+    "@atcute/identity": "npm:^2.0.1"
+    "@atcute/lexicons": "npm:^2.0.2"
+    "@atcute/oauth-keyset": "npm:^0.1.2"
+    valibot: "npm:^1.4.1"
+  checksum: 10/8c65971c177e26c3ba732e34ba3ee9f4d8cad0e4a2b9ed04aa7d3fb6e5842a2f4dcb6084beebb766e4b78e6c1d647dad165164fba27ba3d33cd2bc1f77ec0084
   languageName: node
   linkType: hard
 
@@ -307,7 +361,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@atcute/uint8array@npm:^1.1.1, @atcute/uint8array@npm:^1.1.5, @atcute/uint8array@npm:^1.2.0, @atcute/uint8array@npm:^1.2.1":
+"@atcute/uint8array@npm:^1.1.1, @atcute/uint8array@npm:^1.1.3, @atcute/uint8array@npm:^1.1.5, @atcute/uint8array@npm:^1.2.0, @atcute/uint8array@npm:^1.2.1":
   version: 1.2.1
   resolution: "@atcute/uint8array@npm:1.2.1"
   checksum: 10/692e201874d0135b089d5d62d806bb413cd6ce3a1fe51c5e8e5336256bb11d4df52e8edebeff659916c0c54db33319c23bb5eda007e2415619270daa5e1d89c9
@@ -2384,6 +2438,7 @@ __metadata:
     "@atcute/did-plc": "npm:1.0.2"
     "@atcute/identity": "npm:^2.0.2"
     "@atcute/identity-resolver": "npm:^2.0.3"
+    "@atcute/oauth-node-client": "npm:^2.1.0"
     "@bomb.sh/router": "npm:0.8.0"
     "@clack/prompts": "npm:1.9.0"
     "@getcirrus/pds": "npm:0.19.0"
@@ -3803,6 +3858,24 @@ __metadata:
   languageName: node
   linkType: hard
 
+"nanoid@npm:^5.1.16":
+  version: 5.1.16
+  resolution: "nanoid@npm:5.1.16"
+  bin:
+    nanoid: bin/nanoid.js
+  checksum: 10/b1e702e2b7072e74ac2ae880907d0a291853a36617ec5c3d27d81ab04965ebc0d4d0f707cf9220928cf93d5370b1f561c930efee853dc9c1a3facaefdf1a42ee
+  languageName: node
+  linkType: hard
+
+"nanoid@npm:^6.0.2":
+  version: 6.0.2
+  resolution: "nanoid@npm:6.0.2"
+  bin:
+    nanoid: bin/nanoid.js
+  checksum: 10/c555e99171c0988195d71ba22a7acd96f18c767b4a1db5c2a3d75ebf9c302a269fcda3c22e2d6022f3e5a345dcf7188a36f88c6d5fffc2828c68a1b7f9996daf
+  languageName: node
+  linkType: hard
+
 "node-gyp@npm:latest":
   version: 13.1.0
   resolution: "node-gyp@npm:13.1.0"
@@ -4938,7 +5011,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"valibot@npm:^1.4.2, valibot@npm:^1.5.0":
+"valibot@npm:^1.4.1, valibot@npm:^1.4.2, valibot@npm:^1.5.0":
   version: 1.5.0
   resolution: "valibot@npm:1.5.0"
   peerDependencies:

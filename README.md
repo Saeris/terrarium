@@ -63,6 +63,18 @@ await page.goto("https://your.app/");
 
 Every request a page makes to Terrarium's addresses is answered by the sandbox, including top-level navigations, so an OAuth redirect lands on the account's PDS sign-in page. Jetstream is answered over WebSocket. No TLS or DNS is involved: Playwright hands the request over before it reaches the network.
 
+Once the app has sent the page to that sign-in page, `signIn` does what a person would there: types the account's password, presses Allow, and waits for the PDS to send the page back to the app.
+
+```ts
+import { route, signIn } from "@saeris/terrarium/playwright";
+
+await page.getByLabel("Handle").fill(alice.handle); // your app's own sign-in form
+await page.getByRole("button", { name: "Sign in" }).click();
+await signIn(page, alice);
+```
+
+If the PDS won't let the account through, `signIn` throws with what the page says, such as `alice.test's PDS refused the sign-in: Invalid password`, rather than leaving the test to time out. The app's OAuth client must be inside the sandbox, at a `.internal` host, so the PDS can fetch its client metadata: see [On Cloudflare Workers](#on-cloudflare-workers-with-miniflare) for an app on Workers, or `terrarium.mount` for one in the test's own process.
+
 ### In another Node process
 
 An app’s dev server, or any script, can use a running sandbox (`terrarium start`) without a line of it changing: preload the interceptor.

@@ -66,6 +66,7 @@
     "@atcute/client": "^5.1.2",
     "@atcute/identity": "^2.0.2",
     "@atcute/identity-resolver": "^2.0.3",
+    "@atcute/oauth-node-client": "^2.1.0",
     "@getcirrus/pds": "0.19.0",
     "@saeris/configs": "^1.6.1",
     "@types/node": "^26.6.6",
