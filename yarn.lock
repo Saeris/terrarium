@@ -2460,11 +2460,14 @@ __metadata:
   peerDependencies:
     msw: ^3.0.0
     playwright-core: ^1.48.0
+    vite: "*"
     wrangler: ^4.130.0
   peerDependenciesMeta:
     msw:
       optional: true
     playwright-core:
+      optional: true
+    vite:
       optional: true
     wrangler:
       optional: true
