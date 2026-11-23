@@ -92,7 +92,39 @@ terrarium run "yarn dev"                        # or "vp test", or anything else
 terrarium run "yarn dev" --unowned refuse       # and keep it off the network
 ```
 
-It uses the sandbox already running at `--url` (`TERRARIUM_URL`, or `http://127.0.0.1:2580`) and leaves it running. With none there, it starts one for the command, from `--dir`, and stops it when the command ends. The command runs in a shell, so quote it as one argument; its output is its own, and it exits as the command did. Only Node processes are preloaded: a Worker under `wrangler dev` runs in `workerd`, which needs [Miniflare's outbound](#on-cloudflare-workers-with-miniflare).
+It uses the sandbox already running at `--url` (`TERRARIUM_URL`, or the `--host` and `--port` it would start on) and leaves it running. With none there, it starts one for the command, from `--dir`, and stops it when the command ends. The command runs in a shell, so quote it as one argument; its output is its own, and it exits as the command did. Only Node processes are preloaded: a Worker under `wrangler dev` runs in `workerd`, which needs [Miniflare's outbound](#on-cloudflare-workers-with-miniflare).
+
+### In a Vite dev server
+
+Say what sandbox the app needs in `vite.config.ts`:
+
+```ts
+import { defineConfig } from "vite";
+import { terrarium } from "@saeris/terrarium/vite";
+import { menu } from "./fixtures/menu";
+
+export default defineConfig({
+  plugins: [
+    terrarium({
+      accounts: {
+        alice: {},
+        venue: {
+          handle: "venue.example.com",
+          records: (venue) => menu(venue.did) // [{ collection, rkey, record }]
+        }
+      }
+    })
+  ]
+});
+```
+
+`vite dev` then brings the sandbox up with those accounts, and points the dev server's own process at it as `@saeris/terrarium/register` would, so the app's server code (SSR, API routes, server functions) reaches it at the network's own addresses. A sandbox already running (at `TERRARIUM_URL`, or the plugin's `host` and `port`) is used and left running. Otherwise the dev server starts one, keeps it through restarts, and stops it when it closes. The plugin stays out of `vite build`, `vite preview` and Vitest, whose tests make their own sandboxes.
+
+An account is made if it's missing; one that's already there keeps its handle and password. Its `records` are written every time the sandbox starts, replacing what's there by rkey, so the config stays what's there: each needs an `rkey`, since one without would be added again every time. A function is given the account, for records that name it, such as an at:// URI with its DID.
+
+`terrarium start` and `terrarium run` read the same options from the `vite.config.*` in the directory they run in, or the file `--config` names, and their flags win over it. A Vite app needs neither: `terrarium start` is for one sandbox several apps share, and `terrarium run` for commands that aren't a Vite dev server.
+
+Only the dev server's process is pointed at the sandbox, not the page in your browser; a page reaches it under Playwright, with `route`.
 
 ### On Cloudflare Workers, with Miniflare
 
@@ -246,14 +278,18 @@ Hand `terrarium.fetch` to a client that accepts a custom `fetch`, and `terrarium
 
 ## 🎛 Configuration
 
-| Option                             | CLI      | Default                                                        |
-| ---------------------------------- | -------- | -------------------------------------------------------------- |
-| State directory                    | `--dir`  | `.terrarium` (in memory for `createTerrarium()` without `dir`) |
-| Host every service is addressed by | `--host` | `127.0.0.1`                                                    |
-| Control API port                   | `--port` | `2580`                                                         |
-| PLC directory port                 |          | `2582`                                                         |
-| Jetstream port                     |          | `2584`                                                         |
-| First PDS port                     |          | `2600`, then one more per account                              |
+| Option                             | Vite plugin       | CLI                 | Default                                                        |
+| ---------------------------------- | ----------------- | ------------------- | -------------------------------------------------------------- |
+| State directory                    | `dir`             | `--dir`             | `.terrarium` (in memory for `createTerrarium()` without `dir`) |
+| Host every service is addressed by | `host`            | `--host`            | `127.0.0.1`                                                    |
+| Control API port                   | `port`            | `--port`            | `2580`                                                         |
+| PLC directory port                 | `ports.plc`       |                     | `2582`                                                         |
+| Jetstream port                     | `ports.jetstream` |                     | `2584`                                                         |
+| First PDS port                     | `ports.pds`       |                     | `2600`, then one more per account                              |
+| Accounts, and their records        | `accounts`        |                     | None                                                           |
+| Requests to anywhere else          | `unowned`         | `--unowned` (`run`) | `"network"`                                                    |
+
+The plugin's `dir` is relative to the Vite config. `ports` takes all three.
 
 Add your state directory to `.gitignore`: it holds every account's keys and password.
 

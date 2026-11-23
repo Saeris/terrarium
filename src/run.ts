@@ -1,35 +1,26 @@
 import { spawn } from "node:child_process";
-import type { Unowned } from "./hosts";
-import { startServer, type ServerOptions } from "./server";
+import { provision, type TerrariumConfig } from "./config";
+import { isRunning, startServer } from "./server";
 
 /**
- * `terrarium run "<command>"`: a command, such as an app's dev server or its tests, inside the sandbox. Its Node processes are preloaded with `@saeris/terrarium/register` and pointed at the sandbox, so they reach it at the network's own addresses. A sandbox already running at `url` is used and left running; otherwise one is started for the command and stopped when it ends.
+ * `terrarium run "<command>"`: a command, such as an app's dev server or its tests, inside the sandbox. Its Node processes are preloaded with `@saeris/terrarium/register` and pointed at the sandbox, so they reach it at the network's own addresses. A sandbox already running at `url` is used and left running; otherwise one is started for the command and stopped when it ends. Either way, it has the config's accounts before the command starts.
  */
 
-export interface RunOptions extends ServerOptions {
+export interface RunOptions extends TerrariumConfig {
   /** The command, as a shell runs it. */
   readonly command: string;
   /** Where a running sandbox's control API would be. */
   readonly url: string;
-  /** What the command's requests to addresses the sandbox doesn't own do: as `TERRARIUM_UNOWNED`. */
-  readonly unowned?: Unowned | undefined;
   /** The preload, built beside this module. */
   readonly register?: URL;
 }
-
-const isRunning = async (url: string): Promise<boolean> => {
-  try {
-    return (await fetch(`${url}/health`)).ok;
-  } catch {
-    return false;
-  }
-};
 
 /** Run the command; resolves with its exit code. */
 export const run = async ({
   command,
   url,
   unowned,
+  accounts,
   register = new URL("./register.mjs", import.meta.url),
   ...options
 }: RunOptions): Promise<number> => {
@@ -37,6 +28,13 @@ export const run = async ({
     ? undefined
     : await startServer(options);
   const control = started?.url ?? url;
+
+  try {
+    await provision(control, accounts);
+  } catch (error) {
+    await started?.close();
+    throw error;
+  }
 
   // stdout is the command's: what Terrarium says goes to stderr.
   console.error(

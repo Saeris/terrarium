@@ -36,6 +36,15 @@ export interface Server {
   close(): Promise<void>;
 }
 
+/** Whether a sandbox's control API answers at `url`. */
+export const isRunning = async (url: string): Promise<boolean> => {
+  try {
+    return (await fetch(`${url}/health`)).ok;
+  } catch {
+    return false;
+  }
+};
+
 export const startServer = async ({
   dir,
   host = DEFAULT_HOST,

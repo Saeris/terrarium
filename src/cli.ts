@@ -18,6 +18,7 @@ import {
 import { intro, log, outro, spinner } from "@clack/prompts";
 import * as v from "valibot";
 import manifest from "../package.json" with { type: "json" };
+import { loadConfig, provision, type TerrariumConfig } from "./config";
 import { run } from "./run";
 import { DEFAULT_CONTROL_PORT, startServer } from "./server";
 import { DEFAULT_HOST } from "./terrarium";
@@ -35,22 +36,35 @@ const url = option(
   env("TERRARIUM_URL")
 );
 
+// Left unset unless given, so a Vite config's Terrarium options can fill them.
 const dir = option(
   name("dir"),
-  description("Where to keep accounts and data"),
-  schema(v.optional(v.string(), ".terrarium"))
+  description("Where to keep accounts and data (default .terrarium)"),
+  schema(v.optional(v.string()))
 );
 
 const host = option(
   name("host"),
-  description("The host every service is addressed by"),
-  schema(v.optional(v.string(), DEFAULT_HOST))
+  description(
+    `The host every service is addressed by (default ${DEFAULT_HOST})`
+  ),
+  schema(v.optional(v.string()))
 );
 
 const port = option(
   name("port"),
-  description("The control API's port"),
-  schema(v.optional(v.number(), DEFAULT_CONTROL_PORT))
+  description(
+    `The control API's port (default ${String(DEFAULT_CONTROL_PORT)})`
+  ),
+  schema(v.optional(v.number()))
+);
+
+const config = option(
+  name("config"),
+  description(
+    "A Vite config whose Terrarium plugin names the accounts to make, and where the sandbox runs (default vite.config.* here, if there is one)"
+  ),
+  schema(v.optional(v.string()))
 );
 
 const app = command(
@@ -62,6 +76,7 @@ const app = command(
   command(
     name("start"),
     description("Start a sandbox and keep it running"),
+    config,
     dir,
     host,
     port
@@ -79,7 +94,15 @@ const app = command(
       ),
       schema(v.optional(v.picklist(["network", "refuse"])))
     ),
-    url,
+    option(
+      name("url"),
+      description(
+        "Where a running sandbox's control API would be (default the --host and --port it would start on)"
+      ),
+      schema(v.optional(v.string())),
+      env("TERRARIUM_URL")
+    ),
+    config,
     dir,
     host,
     port
@@ -170,15 +193,35 @@ const call = async (
   }
 };
 
-const start = async ({
+interface Flags {
+  readonly config?: string | undefined;
+  readonly dir?: string | undefined;
+  readonly host?: string | undefined;
+  readonly port?: number | undefined;
+}
+
+/** The sandbox's settings: the flags given, then the Vite config's Terrarium options, then the defaults. */
+const configure = async ({
+  config: file,
   dir,
   host,
   port
-}: {
-  dir: string;
-  host: string;
-  port: number;
-}): Promise<void> => {
+}: Flags): Promise<
+  TerrariumConfig & { dir: string; host: string; port: number }
+> => {
+  const found = await loadConfig(file);
+
+  return {
+    ...found,
+    dir: dir ?? found?.dir ?? ".terrarium",
+    host: host ?? found?.host ?? DEFAULT_HOST,
+    port: port ?? found?.port ?? DEFAULT_CONTROL_PORT
+  };
+};
+
+const start = async (flags: Flags): Promise<void> => {
+  const { accounts: wanted, unowned: _, ...options } = await configure(flags);
+  const { dir } = options;
   // A person at a terminal gets a summary; a script or an agent gets one line of JSON to read.
   const human = process.stdout.isTTY;
   const progress = human ? spinner() : undefined;
@@ -189,7 +232,15 @@ const start = async ({
 
   progress?.start(`Starting the sandbox in ${dir}`);
 
-  const server = await startServer({ dir, host, port });
+  const server = await startServer(options);
+
+  try {
+    await provision(server.url, wanted);
+  } catch (error) {
+    await server.close();
+    throw error;
+  }
+
   const accounts = server.terrarium.accounts();
 
   if (human) {
@@ -250,7 +301,15 @@ if (!result.ok) {
       break;
     }
     case "/run": {
-      process.exitCode = await run(result.model);
+      const { command, url: running, unowned } = result.model;
+      const settings = await configure(result.model);
+
+      process.exitCode = await run({
+        ...settings,
+        command,
+        url: running ?? `http://${settings.host}:${String(settings.port)}`,
+        ...(unowned !== undefined && { unowned })
+      });
       break;
     }
     case "/accounts": {
