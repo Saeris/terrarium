@@ -15,7 +15,12 @@ import {
   PLC_HOST
 } from "./hosts";
 import { appview, type Profile } from "./appview";
-import { createJetstream, filterFrom, type Jetstream } from "./jetstream";
+import {
+  accept,
+  createJetstream,
+  type Jetstream,
+  type JetstreamConnection
+} from "./jetstream";
 import { keyFrom, newKey } from "./keys";
 import { createPlc } from "./plc";
 
@@ -28,12 +33,13 @@ import { createPlc } from "./plc";
 export const DEFAULT_HOST = "127.0.0.1";
 export const DEFAULT_PORTS = { plc: 2582, jetstream: 2584, pds: 2600 } as const;
 
-/** The part of a WebSocket a client reads from, as browsers and Node have it. What `connect` gives in place of one. */
+/** The part of a WebSocket a client uses, as browsers and Node have it. What `connect` gives in place of one. */
 export interface SocketLike {
   onopen: (() => void) | null;
   onmessage: ((event: { data: string }) => void) | null;
-  onclose: (() => void) | null;
+  onclose: ((event: { code: number; reason: string }) => void) | null;
   onerror: (() => void) | null;
+  send(data: string): void;
   close(): void;
 }
 
@@ -437,37 +443,57 @@ export const createTerrarium = async ({
 
   const connect = (url: string): SocketLike => {
     const target = new URL(url);
-    let stop: (() => void) | undefined;
+    let connection: JetstreamConnection | undefined;
+    let closed = false;
+    const hangUp = (event: { code: number; reason: string }): void => {
+      if (closed) {
+        return;
+      }
+
+      closed = true;
+      connection?.close();
+      queueMicrotask(() => socket.onclose?.(event));
+    };
     const socket: SocketLike = {
       onopen: null,
       onmessage: null,
       onclose: null,
       onerror: null,
+      send() {
+        connection?.receive();
+      },
       close() {
-        stop?.();
-        stop = undefined;
-        queueMicrotask(() => socket.onclose?.());
+        hangUp({ code: 1005, reason: "" });
       }
     };
 
     // Opened on the next tick, as a real socket is, so a client can set its handlers first.
     queueMicrotask(() => {
-      if (!isJetstream(target) || target.pathname !== "/subscribe") {
+      connection = isJetstream(target)
+        ? accept(jetstream, target, {
+            // Each message in a later task, as the network delivers them: a replay mustn't arrive before the client has finished reacting to the open.
+            send(data) {
+              setTimeout(() => {
+                if (!closed) {
+                  socket.onmessage?.({ data });
+                }
+              }, 0);
+            },
+            close(code, reason) {
+              hangUp({ code, reason });
+            }
+          })
+        : undefined;
+
+      if (!connection) {
+        closed = true;
         socket.onerror?.();
-        socket.onclose?.();
+        socket.onclose?.({ code: 1006, reason: "" });
 
         return;
       }
 
       socket.onopen?.();
-      // Each message in a later task, as the network delivers them: a replay mustn't arrive before the client has finished reacting to the open.
-      stop = jetstream.subscribe(filterFrom(target), (event) => {
-        const data = JSON.stringify(event);
-
-        setTimeout(() => {
-          socket.onmessage?.({ data });
-        }, 0);
-      });
     });
 
     return socket;

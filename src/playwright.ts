@@ -1,6 +1,7 @@
 import type { BrowserContext, Page, Route } from "playwright-core";
 import { JETSTREAM_HOSTS, isLoopback, refuse, type Unowned } from "./hosts";
-import { filterFrom } from "./jetstream";
+import { accept, SUBSCRIBE } from "./jetstream";
+import { SUBSCRIBE_EVENTS } from "./jetstream-v2";
 import type { Account, Terrarium } from "./terrarium";
 
 /**
@@ -145,14 +146,30 @@ export const route = async (
   await target.routeWebSocket(
     (url) => JETSTREAM_HOSTS.has(url.hostname),
     (socket) => {
-      const stop = terrarium.jetstream.subscribe(
-        filterFrom(new URL(socket.url())),
-        (event) => {
-          socket.send(JSON.stringify(event));
+      const connection = accept(terrarium.jetstream, new URL(socket.url()), {
+        send(frame) {
+          socket.send(frame);
+        },
+        close(code, reason) {
+          void socket.close({ code, reason });
         }
-      );
+      });
 
-      socket.onClose(stop);
+      if (!connection) {
+        void socket.close({
+          code: 1008,
+          reason: `Jetstream subscribes at ${SUBSCRIBE} or ${SUBSCRIBE_EVENTS}.`
+        });
+
+        return;
+      }
+
+      socket.onMessage(() => {
+        connection.receive();
+      });
+      socket.onClose(() => {
+        connection.close();
+      });
     }
   );
 

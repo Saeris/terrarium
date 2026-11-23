@@ -4,6 +4,8 @@ import { setupServer } from "msw/node";
 import { ws } from "msw/ws";
 import * as v from "valibot";
 import { PROXY_UNOWNED_HEADER, PROXY_URL_HEADER } from "./control";
+import { SUBSCRIBE } from "./jetstream";
+import { SUBSCRIBE_EVENTS } from "./jetstream-v2";
 import {
   JETSTREAM_HOSTS,
   isHandleLookup,
@@ -118,24 +120,54 @@ export const intercept = async ({
             )
           ]
         : []),
-      ...[...JETSTREAM_HOSTS].map((host) =>
-        ws
-          .link(`wss://${host}/subscribe`)
-          .addEventListener("connection", ({ client }) => {
-            const upstream = new WebSocket(
-              `${local.jetstream}${client.url.search}`
-            );
+      ...[...JETSTREAM_HOSTS].flatMap((host) =>
+        [SUBSCRIBE, SUBSCRIBE_EVENTS].map((path) =>
+          ws
+            .link(`wss://${host}${path}`)
+            .addEventListener("connection", ({ client }) => {
+              // The same path and query on the sandbox's own Jetstream port.
+              const upstream = new WebSocket(
+                new URL(
+                  `${client.url.pathname}${client.url.search}`,
+                  local.jetstream
+                )
+              );
 
-            upstream.addEventListener("message", (event: { data: unknown }) => {
-              client.send(String(event.data));
-            });
-            upstream.addEventListener("close", () => {
-              client.close();
-            });
-            client.addEventListener("close", () => {
-              upstream.close();
-            });
-          })
+              upstream.addEventListener(
+                "message",
+                (event: { data: unknown }) => {
+                  client.send(String(event.data));
+                }
+              );
+              // With the code and reason Jetstream gave, such as v2 refusing a cursor.
+              upstream.addEventListener(
+                "close",
+                ({ code, reason }: { code: number; reason: string }) => {
+                  if (code === 1005 || code === 1006) {
+                    client.close();
+                  } else {
+                    client.close(code, reason);
+                  }
+                }
+              );
+              client.addEventListener("message", ({ data }) => {
+                if (upstream.readyState === WebSocket.OPEN) {
+                  upstream.send(data);
+                } else {
+                  upstream.addEventListener(
+                    "open",
+                    () => {
+                      upstream.send(data);
+                    },
+                    { once: true }
+                  );
+                }
+              });
+              client.addEventListener("close", () => {
+                upstream.close();
+              });
+            })
+        )
       )
     );
 

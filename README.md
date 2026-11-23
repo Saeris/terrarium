@@ -209,6 +209,16 @@ A running sandbox also answers on local ports, for clients nothing intercepts, s
 
 The same events and query parameters as Bluesky's Jetstream (`wantedDids`, `wantedCollections` with `.*` prefixes, and a microsecond `cursor` to replay from), fed straight from every PDS's firehose. It keeps the last 10,000 events for replaying; its history starts empty after a restart.
 
+Its v2 stream, which `@bsky/jetstream` reads, is at `/xrpc/network.bsky.jetstream.subscribeEvents` on the same hosts:
+
+- Frames are the lexicon's `{ $type: "message", payload }`.
+- Every event carries a `seq` to resume from, inclusively. A `cursor` of 10¹⁵ or more is a time in microseconds instead, and one older than what's kept is clamped, with an `OutdatedCursor` notice first.
+- The filters are `kinds`, `dids` and `collections`, and `collections` narrows only commits.
+- What it refuses closes the socket at once, with code 1008 and the error as the reason: `CursorTooOld: …` for a seq older than what's kept, or `InvalidRequest: v2 takes dids, not wantedDids.` for v1's names. Bluesky's answers these with an HTTP 400 before the socket opens.
+- A client sending anything ends the stream, as it does on Bluesky's.
+
+Not emulated: compression (`zstdDictionary` is refused), `maxMessageSizeBytes`, and `#sync` events.
+
 It can also misbehave on purpose, as a real relay does, so you can test what your app does about it:
 
 ```bash

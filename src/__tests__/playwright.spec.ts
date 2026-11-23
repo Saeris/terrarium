@@ -158,6 +158,43 @@ describe("terrarium inside a Playwright browser", () => {
     await expect(arrived).resolves.toBe("seen by the page");
   });
 
+  it("follows Jetstream's v2 stream from inside the page, subprotocol and all", async () => {
+    const page = await context.newPage();
+    const since = Date.now() * 1000;
+
+    await page.goto(`${alice.endpoint}/`);
+    await terrarium.seed("alice", [
+      { collection: NOTE, record: { text: "v2 in the page" } }
+    ]);
+    // Long enough for the write to reach Jetstream, to be replayed from the time.
+    await page.waitForTimeout(300);
+
+    const first = await page.evaluate(
+      async ({ did, cursor }) =>
+        new Promise<unknown>((resolve) => {
+          const socket = new WebSocket(
+            `wss://jetstream2.us-east.bsky.network/xrpc/network.bsky.jetstream.subscribeEvents?dids=${did}&cursor=${cursor}`,
+            "xrpc.v1.json"
+          );
+
+          socket.addEventListener("message", (event: { data: unknown }) => {
+            resolve(JSON.parse(String(event.data)));
+          });
+          socket.addEventListener("close", ({ code, reason }) => {
+            resolve({ code, reason });
+          });
+        }),
+      { did: alice.did, cursor: String(since) }
+    );
+
+    expect(first).toMatchObject({
+      payload: {
+        $type: "network.bsky.jetstream.subscribeEvents#commit",
+        record: { text: "v2 in the page" }
+      }
+    });
+  });
+
   it("keeps the page off the internet when asked, but not off this machine, where the app under test runs", async () => {
     const local = createServer((_, response) => {
       response.end("local");

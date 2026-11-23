@@ -3,9 +3,10 @@ import { fromUint8Array } from "@atcute/car";
 import * as CID from "@atcute/cid";
 import { isCidLink, type CidLink } from "@atcute/cid";
 import * as v from "valibot";
+import { SUBSCRIBE_EVENTS, subscribeEvents } from "./jetstream-v2";
 
 /**
- * Jetstream: every PDS's firehose turned into JSON events, filtered by DID and collection, with a microsecond cursor to resume from. The same events and query parameters as Bluesky's Jetstream, so a client written against it works here unchanged.
+ * Jetstream: every PDS's firehose turned into JSON events, filtered by DID and collection, with a microsecond cursor to resume from. The same events and query parameters as Bluesky's Jetstream, so a client written against it works here unchanged: its `/subscribe`, and its v2 stream (`./jetstream-v2`).
  *
  * There's no relay in between: each PDS's `subscribeRepos` feeds it directly. What a relay can do to a client (fall behind, or stop carrying an account altogether) is something to switch on (`pause`, `ignore`), not something that happens by accident.
  */
@@ -59,16 +60,28 @@ export interface Filter {
   readonly wantedCollections: readonly string[];
   /** Replay from this `time_us`, then carry on live. Live only when left out. */
   readonly cursor?: number | undefined;
+  /** Only these kinds of event (v2's `kinds`). Every kind when empty or left out. */
+  readonly kinds?: readonly string[] | undefined;
+  /** Replay from this seq, inclusive (v2's cursor), in place of `cursor`. */
+  readonly seq?: number | undefined;
 }
 
 export interface Jetstream {
   /** One `subscribeRepos` frame from a PDS. */
   ingest(frame: Uint8Array): void;
-  /** Events matching the filter: the replay first, then as they happen. Returns how to stop. */
+  /** Events matching the filter, each with its seq: the replay first, then as they happen. Returns how to stop. */
   subscribe(
     filter: Filter,
-    listener: (event: JetstreamEvent) => void
+    listener: (event: JetstreamEvent, seq: number) => void
   ): () => void;
+  /** What it can replay: every event from seq `floor` up to `next` (the seq the next event gets), which is everything since `since` (unix microseconds). Before that, events were dropped, or happened before this Jetstream started. */
+  readonly history: {
+    readonly floor: number;
+    readonly next: number;
+    readonly since: number;
+  };
+  /** The seq of the first event kept at or after a time in unix microseconds; `next` if there's none yet. */
+  seqAt(time: number): number;
   /** Hold every event back from subscribers, as a relay that's fallen behind does. They're kept, and delivered on `resume`. */
   pause(): void;
   resume(): void;
@@ -96,6 +109,9 @@ export const filterFrom = (url: URL): Filter => {
 };
 
 const matches = (filter: Filter, event: JetstreamEvent): boolean =>
+  (filter.kinds === undefined ||
+    filter.kinds.length === 0 ||
+    filter.kinds.includes(event.kind)) &&
   (filter.wantedDids.length === 0 || filter.wantedDids.includes(event.did)) &&
   (event.kind !== "commit" ||
     filter.wantedCollections.length === 0 ||
@@ -157,16 +173,25 @@ const frameOf = (
 /** A CBOR value as JSON: links as `{ $link }`, bytes as `{ $bytes }`, which is how Jetstream writes records. */
 const asJson = (value: unknown): unknown => JSON.parse(JSON.stringify(value));
 
+/** An event as it's kept: numbered in the order it happened. */
+interface Logged {
+  readonly seq: number;
+  readonly event: JetstreamEvent;
+}
+
 export const createJetstream = (): Jetstream => {
-  const events: JetstreamEvent[] = [];
+  const events: Logged[] = [];
   const subscribers = new Set<{
     filter: Filter;
-    listener: (event: JetstreamEvent) => void;
+    listener: (event: JetstreamEvent, seq: number) => void;
   }>();
   const ignored = new Set<string>();
+  const started = Date.now() * 1000;
   let paused = false;
-  let held: JetstreamEvent[] = [];
+  let held: Logged[] = [];
   let last = 0;
+  let next = 1;
+  let dropped = false;
 
   /** Microseconds since the epoch, never repeating and never going back: it's every subscriber's cursor. */
   const now = (): number => {
@@ -175,25 +200,29 @@ export const createJetstream = (): Jetstream => {
     return last;
   };
 
-  const deliver = (event: JetstreamEvent): void => {
+  const deliver = ({ seq, event }: Logged): void => {
     for (const { filter, listener } of subscribers) {
       if (matches(filter, event)) {
-        listener(event);
+        listener(event, seq);
       }
     }
   };
 
   const publish = (event: JetstreamEvent): void => {
-    events.push(event);
+    const logged = { seq: next, event };
+
+    next += 1;
+    events.push(logged);
 
     if (events.length > RETAIN) {
       events.splice(0, events.length - RETAIN);
+      dropped = true;
     }
 
     if (paused) {
-      held.push(event);
+      held.push(logged);
     } else {
-      deliver(event);
+      deliver(logged);
     }
   };
 
@@ -268,16 +297,20 @@ export const createJetstream = (): Jetstream => {
     subscribe(filter, listener) {
       const subscriber = { filter, listener };
 
-      if (filter.cursor !== undefined) {
-        const from = filter.cursor;
+      const { seq: fromSeq, cursor: fromTime } = filter;
 
-        for (const event of events) {
+      if (fromSeq !== undefined || fromTime !== undefined) {
+        for (const logged of events) {
+          const { seq, event } = logged;
+
           if (
-            event.time_us >= from &&
-            !held.includes(event) &&
+            (fromSeq === undefined
+              ? event.time_us >= (fromTime ?? 0)
+              : seq >= fromSeq) &&
+            !held.includes(logged) &&
             matches(filter, event)
           ) {
-            listener(event);
+            listener(event, seq);
           }
         }
       }
@@ -310,6 +343,63 @@ export const createJetstream = (): Jetstream => {
     },
     get state() {
       return { paused, ignored: [...ignored] };
+    },
+    get history() {
+      const [oldest] = events;
+
+      return {
+        floor: oldest?.seq ?? next,
+        next,
+        since: dropped && oldest ? oldest.event.time_us : started
+      };
+    },
+    seqAt(time) {
+      return events.find(({ event }) => event.time_us >= time)?.seq ?? next;
     }
+  };
+};
+
+/** Bluesky's Jetstream path, which Terrarium's `JetstreamEvent`s are the messages of. */
+export const SUBSCRIBE = "/subscribe";
+
+/** A client's end of a Jetstream socket, as each interceptor has it. */
+export interface JetstreamClient {
+  send(frame: string): void;
+  close(code: number, reason: string): void;
+}
+
+/** What an interceptor tells Jetstream about the client. */
+export interface JetstreamConnection {
+  /** The client sent a frame. */
+  receive(): void;
+  /** The client went. */
+  close(): void;
+}
+
+/**
+ * A client opening a socket at `url`, answered in the protocol its path asks for: `/subscribe`, or v2's `/xrpc/network.bsky.jetstream.subscribeEvents`. Undefined for any other path, for the interceptor to refuse in its own way. Every interceptor goes through here, so they all speak both.
+ */
+export const accept = (
+  jetstream: Jetstream,
+  url: URL,
+  client: JetstreamClient
+): JetstreamConnection | undefined => {
+  if (url.pathname === SUBSCRIBE_EVENTS) {
+    return subscribeEvents(jetstream, url, client);
+  }
+
+  if (url.pathname !== SUBSCRIBE) {
+    return undefined;
+  }
+
+  const stop = jetstream.subscribe(filterFrom(url), (event) => {
+    client.send(JSON.stringify(event));
+  });
+
+  return {
+    receive() {
+      // v1's options_update isn't emulated: what a client sends is ignored.
+    },
+    close: stop
   };
 };
