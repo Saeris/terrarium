@@ -85,6 +85,15 @@ TERRARIUM_URL=http://127.0.0.1:2580 node --import @saeris/terrarium/register ser
 
 That process’s requests to the sandbox’s addresses are forwarded to the sandbox (Mock Service Worker intercepts them in that process), its Jetstream connections are piped to the sandbox’s Jetstream, and everything else goes where it always did. For a dev server started by a tool, pass it through `NODE_OPTIONS="--import @saeris/terrarium/register"`.
 
+Or let `terrarium run` do both, in one shell:
+
+```bash
+terrarium run "yarn dev"                        # or "vp test", or anything else
+terrarium run "yarn dev" --unowned refuse       # and keep it off the network
+```
+
+It uses the sandbox already running at `--url` (`TERRARIUM_URL`, or `http://127.0.0.1:2580`) and leaves it running. With none there, it starts one for the command, from `--dir`, and stops it when the command ends. The command runs in a shell, so quote it as one argument; its output is its own, and it exits as the command did. Only Node processes are preloaded: a Worker under `wrangler dev` runs in `workerd`, which needs [Miniflare's outbound](#on-cloudflare-workers-with-miniflare).
+
 ### On Cloudflare Workers, with Miniflare
 
 A Worker makes its requests from `workerd`, where nothing that patches Node reaches. Give Miniflare Terrarium as its outbound network, and mount the app inside the sandbox when PDSes need to reach it too, as an OAuth sign-in does:

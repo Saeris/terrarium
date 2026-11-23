@@ -18,6 +18,7 @@ import {
 import { intro, log, outro, spinner } from "@clack/prompts";
 import * as v from "valibot";
 import manifest from "../package.json" with { type: "json" };
+import { run } from "./run";
 import { DEFAULT_CONTROL_PORT, startServer } from "./server";
 import { DEFAULT_HOST } from "./terrarium";
 
@@ -34,6 +35,24 @@ const url = option(
   env("TERRARIUM_URL")
 );
 
+const dir = option(
+  name("dir"),
+  description("Where to keep accounts and data"),
+  schema(v.optional(v.string(), ".terrarium"))
+);
+
+const host = option(
+  name("host"),
+  description("The host every service is addressed by"),
+  schema(v.optional(v.string(), DEFAULT_HOST))
+);
+
+const port = option(
+  name("port"),
+  description("The control API's port"),
+  schema(v.optional(v.number(), DEFAULT_CONTROL_PORT))
+);
+
 const app = command(
   name("terrarium"),
   description(
@@ -43,21 +62,27 @@ const app = command(
   command(
     name("start"),
     description("Start a sandbox and keep it running"),
-    option(
-      name("dir"),
-      description("Where to keep accounts and data"),
-      schema(v.optional(v.string(), ".terrarium"))
+    dir,
+    host,
+    port
+  ),
+  command(
+    name("run"),
+    description(
+      'Run a command inside the sandbox, such as "yarn dev": its Node processes reach the sandbox at the network\'s addresses. Uses the sandbox at --url, or starts one for the command and stops it after'
     ),
+    argument(name("command"), schema(v.string())),
     option(
-      name("host"),
-      description("The host every service is addressed by"),
-      schema(v.optional(v.string(), DEFAULT_HOST))
+      name("unowned"),
+      description(
+        'What the command\'s requests to anywhere else do: "network" (the default) or "refuse"'
+      ),
+      schema(v.optional(v.picklist(["network", "refuse"])))
     ),
-    option(
-      name("port"),
-      description("The control API's port"),
-      schema(v.optional(v.number(), DEFAULT_CONTROL_PORT))
-    )
+    url,
+    dir,
+    host,
+    port
   ),
   command(
     name("accounts"),
@@ -222,6 +247,10 @@ if (!result.ok) {
     }
     case "/start": {
       await start(result.model);
+      break;
+    }
+    case "/run": {
+      process.exitCode = await run(result.model);
       break;
     }
     case "/accounts": {
