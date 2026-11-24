@@ -2,6 +2,19 @@
 
 
 
+
+## 0.4.0
+<sub>2026-11-23</sub>
+
+- [#5](https://github.com/Saeris/terrarium/pull/5)  *(minor)* Thanks [@Saeris](https://github.com/Saeris)!
+  `signIn(page, account)` from `@saeris/terrarium/playwright` signs an account in on its PDS's own sign-in and consent page, as a person would, once the app under test has sent the page there: it types the account's password, presses Allow, and resolves when the PDS sends the page back to the app. When the PDS won't let it through (a wrong password, a client it couldn't resolve, permissions it can't show), it throws with what the page says instead of leaving the test to time out. Tested with a real OAuth client (`@atcute/oauth-node-client`) through the whole round trip: PAR, sign-in, consent, the callback, the token exchange, and a DPoP-bound write as the account.
+- [#5](https://github.com/Saeris/terrarium/pull/5)  *(minor)* Thanks [@Saeris](https://github.com/Saeris)!
+  `terrarium run "<command>"` runs a command, such as an app's dev server or its tests, inside the sandbox in one shell: its Node processes are preloaded with `@saeris/terrarium/register` and given `TERRARIUM_URL`, so they reach the sandbox at the network's own addresses. It uses the sandbox already running at `--url` and leaves it running, or starts one for the command (from `--dir`) and stops it when the command ends. `--unowned refuse` keeps the command off the network. The command's output is its own, Terrarium's one line goes to stderr, and `run` exits as the command did.
+- [#5](https://github.com/Saeris/terrarium/pull/5)  *(minor)* Thanks [@Saeris](https://github.com/Saeris)!
+  `@saeris/terrarium/vite`: Terrarium as a Vite plugin, where an app says what sandbox it needs in `vite.config.ts`. `vite dev` brings it up with the accounts the plugin names, writes their records (replacing by rkey, every time, so the config stays what's there; a function is given the account, for records that name its DID), and points the dev server's own process at it, so server code reaches it at the network's own addresses. A sandbox already running is used and left running; one the dev server started lasts through restarts and stops when it closes. It stays out of `vite build`, `vite preview` and Vitest. `terrarium start` and `terrarium run` read the same options from the `vite.config.*` they run beside, or `--config`, with their flags winning.
+- [#5](https://github.com/Saeris/terrarium/pull/5)  *(minor)* Thanks [@Saeris](https://github.com/Saeris)!
+  Jetstream's v2 stream, `/xrpc/network.bsky.jetstream.subscribeEvents`, beside `/subscribe` on every way into the sandbox: Mock Service Worker, Playwright, Miniflare's outbound, the local port and the preload. It frames events as the lexicon does, numbers them with a `seq` to resume from inclusively (or a time in microseconds, clamped with `OutdatedCursor`, or past the tip with `FutureCursor`), filters by `kinds`, `dids` and `collections`, and refuses what Bluesky's refuses (`CursorTooOld`, v1's parameter names, and the rest) by closing the socket with code 1008 and the error as its reason. Compression, `maxMessageSizeBytes` and `#sync` events aren't emulated. A Jetstream listener is now also given each event's seq, and `connect`'s socket has `send`, and passes `onclose` the code and reason.
+
 ## 0.3.0
 <sub>2026-11-21</sub>
 
