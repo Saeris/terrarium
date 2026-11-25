@@ -66,6 +66,39 @@ describe("terrarium inside a Playwright browser", () => {
     ).resolves.toMatchObject([{ name: "state", value: "abc" }]);
   });
 
+  it("keeps the page's fragment through a redirect, as a browser does, since an app may hand a credential over in one", async () => {
+    terrarium.mount("site.example.internal", async (request) => {
+      const { pathname } = new URL(request.url);
+
+      // A static host's trailing slash, and a move that names a fragment of its own.
+      return pathname === "/devices"
+        ? new Response(null, {
+            status: 307,
+            headers: { location: "/devices/" }
+          })
+        : pathname === "/elsewhere"
+          ? new Response(null, {
+              status: 302,
+              headers: { location: "/devices/#its-own" }
+            })
+          : new Response("<!doctype html><title>devices</title>", {
+              headers: { "content-type": "text/html" }
+            });
+    });
+
+    const page = await context.newPage();
+
+    await page.goto("https://site.example.internal/devices#device_token=abc");
+    await page.waitForURL((url) => url.pathname === "/devices/");
+
+    expect(new URL(page.url()).hash).toBe("#device_token=abc");
+
+    await page.goto("https://site.example.internal/elsewhere#mine");
+    await page.waitForURL((url) => url.pathname === "/devices/");
+
+    expect(new URL(page.url()).hash).toBe("#its-own");
+  });
+
   it("follows a redirect inside fetch, as the browser would", async () => {
     terrarium.mount("api.example.internal", async (request) =>
       new URL(request.url).pathname === "/moved"

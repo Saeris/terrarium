@@ -46,7 +46,7 @@ const attribute = (value: string): string =>
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
 
-/** A redirect, as a page that goes there itself. */
+/** A redirect, as a page that goes there itself. A browser carries the page's fragment over when the redirect names none, so this does too: the page is at the address it was sent to, fragment and all, and an app may hand a credential over in one. */
 const hop = (to: string, response: Response): Fulfilment => ({
   status: 200,
   headers: {
@@ -54,7 +54,7 @@ const hop = (to: string, response: Response): Fulfilment => ({
     "cache-control": "no-store",
     ...cookiesOf(response)
   },
-  body: `<!doctype html><meta http-equiv="refresh" content="0;url=${attribute(to)}"><script>location.replace(${JSON.stringify(to)})</script>`
+  body: `<!doctype html><meta http-equiv="refresh" content="0;url=${attribute(to)}"><script>const to = new URL(${JSON.stringify(to)}); to.hash ||= location.hash; location.replace(to)</script>`
 });
 
 /** Follow a redirect chain as a browser does: 307 and 308 keep the method and body, the rest become a GET. Terrarium answers what it owns; the rest goes to the network. */
